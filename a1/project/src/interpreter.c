@@ -203,15 +203,6 @@ int compareNames(const void *a, const void *b) {
     const char *strA = *(const char **)a;
     const char *strB = *(const char **)b;
 
-    int isADot = strcmp(strA, ".");
-    int isBDot = strcmp(strB, ".");
-
-    if (isADot == 0) { return -1; }
-    if (isBDot == 0) { return 1; }
-
-    if (strcmp(strA, "..") == 0 && isBDot != 0) { return -1; }
-    if (strcmp(strB, "..") == 0 && isADot != 0) { return 1; }
-
     return strcmp(strA, strB);
 }
 
