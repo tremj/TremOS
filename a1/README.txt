@@ -1,4 +1,6 @@
-This submission used the starter code provided on MyCourses
+Justin Tremellen, Student ID: 261100081
+
+This submission used the starter code provided on MyCourses.
 
 I made a modification to the starter code to handle how differently the 'print' and 'echo' commands handle non-existant variables.
 
