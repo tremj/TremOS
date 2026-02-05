@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # -------- CONFIG --------
-SRC_DIR="../project/src"  # path to mysh source
+SRC_DIR="../src"  # path to mysh source
 TEST_DIR="."                 # current dir is A1/test-cases
 SHELL_NAME="mysh"
 # Directories/files to clean after all tests
