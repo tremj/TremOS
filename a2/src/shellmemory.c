@@ -10,6 +10,10 @@ struct memory_struct {
 
 struct memory_struct shellmemory[MEM_SIZE];
 
+struct program_line program_memory[MEM_SIZE];
+
+int program_memory_counter;
+
 // Helper functions
 int match(char *model, char *var) {
     int i, len = strlen(var), matchCount = 0;
@@ -28,6 +32,7 @@ void mem_init(){
     for (i = 0; i < MEM_SIZE; i++){		
         shellmemory[i].var   = "none";
         shellmemory[i].value = "none";
+        program_memory[i].line = NULL;
     }
 }
 
@@ -69,4 +74,48 @@ struct memory_return *mem_get_value(char *var_in) {
     result->res = strdup("Variable does not exist");
     result->status = -1;
     return result;
+}
+
+void mem_set_program_line(char *line) {
+    for (int i = program_memory_counter; i < MEM_SIZE; i++) {
+        if (program_memory[i].line == NULL) {
+            program_memory[i].line = strdup(line);
+            program_memory_counter = i + 1;
+            return;
+        }
+    }
+}
+
+char *mem_get_program_line(int index) {
+    if (index < 0 || index >= MEM_SIZE) {
+        return NULL;
+    }
+    return program_memory[index].line;
+}
+
+// load program into memory
+struct pcb *load_program(FILE *p) {
+    struct pcb *pcb = (struct pcb *) malloc(sizeof(struct pcb));
+    pcb->start = program_memory_counter;
+    pcb->pc = 0;
+    pcb->length = 0;
+    pcb->next = NULL;
+    size_t line_buf = 0; // will get resized by getline call
+
+    while (1) {
+        char *line = NULL;
+        ssize_t line_len = getline(&line, &line_buf, p);
+        if (line_len == -1) {
+            break;
+        }
+        if (line_len > 0 && line[line_len - 1] == '\n') {
+            line[line_len - 1] = '\0';
+        }
+
+        mem_set_program_line(line);
+        pcb->length++;
+        free(line);
+    }
+
+    return pcb;
 }

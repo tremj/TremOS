@@ -152,28 +152,36 @@ int print(char *var) {
     return 0;
 }
 
+int runProgram(struct program *program) {
+    int errCode = 0;
+    for (int i = 0; i < program->size; i++) {
+        errCode = parseInput(program->lines[i].line);
+    }
+    return errCode;
+}
+
 int source(char *script) {
     int errCode = 0;
-    char line[MAX_USER_INPUT];
+    int pid;
+    int status;
+
     FILE *p = fopen(script, "rt");      // the program is in a file
 
     if (p == NULL) {
         return badcommandFileDoesNotExist();
     }
 
-    fgets(line, MAX_USER_INPUT - 1, p);
-    while (1) {
-        errCode = parseInput(line);     // which calls interpreter()
-        memset(line, 0, sizeof(line));
 
-        if (feof(p)) {
-            break;
-        }
-        fgets(line, MAX_USER_INPUT - 1, p);
+    if ((pid = fork())) {
+        waitpid(pid, &status, 0);
+        errCode = WEXITSTATUS(status);
+    } else {
+        errCode = runProgram();
+        exit(errCode);
     }
 
-    fclose(p);
 
+    fclose(p);
     return errCode;
 }
 
@@ -314,10 +322,10 @@ int run(char *command_args[], int args_size) {
    int pid;
 
    command_args[args_size] = (char *) NULL;
-   if (pid = fork()) {
-	waitpid(pid, NULL, 0);
+   if ((pid = fork())) {
+       waitpid(pid, NULL, 0);
    } else {
-	execvp(command_args[0], command_args);
+       execvp(command_args[0], command_args);
    }
 
    return errCode;

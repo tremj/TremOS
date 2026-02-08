@@ -5,6 +5,7 @@
 #include "shell.h"
 #include "interpreter.h"
 #include "shellmemory.h"
+#include "queue.h"
 
 int parseInput(char ui[]);
 
@@ -12,6 +13,8 @@ int parseInput(char ui[]);
 int main(int argc, char *argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
     printf("Shell version 1.5 created Dec 2025\n");
+
+    init_queue();
 
     char prompt = '$';  				// Shell prompt
     char userInput[MAX_USER_INPUT];		// user's input stored here
