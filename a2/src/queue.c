@@ -1,18 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include "pcb.h"
 #include "queue.h"
+#include "shellmemory.h"
 
 
-struct ready_queue *queue = NULL;
+struct ready_queue *init_queue() {
+    struct ready_queue *queue = (struct ready_queue *)malloc(sizeof(struct ready_queue));
+    if (queue == NULL) {
+        return NULL;
+    }
 
-void init_queue() {
-    queue = (struct ready_queue *) malloc(sizeof(struct ready_queue));
     queue->size = 0;
     queue->head = NULL;
     queue->tail = NULL;
+
+    return queue;
 }
 
-void enqueue_process(struct pcb *pcb) {
+void enqueue_process(struct ready_queue *queue, struct pcb *pcb) {
     if (queue->size == 0) {
         queue->head = pcb;
         queue->tail = pcb;
@@ -24,7 +30,7 @@ void enqueue_process(struct pcb *pcb) {
     queue->size++;
 }
 
-struct pcb *dequeue_process() {
+struct pcb *dequeue_process(struct ready_queue *queue) {
     if (queue->size == 0) {
         return NULL;
     } else {

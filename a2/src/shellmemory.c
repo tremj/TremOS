@@ -12,7 +12,7 @@ struct memory_struct shellmemory[MEM_SIZE];
 
 struct program_line program_memory[MEM_SIZE];
 
-int program_memory_counter;
+int program_memory_counter = 0;
 
 // Helper functions
 int match(char *model, char *var) {
@@ -93,29 +93,7 @@ char *mem_get_program_line(int index) {
     return program_memory[index].line;
 }
 
-// load program into memory
-struct pcb *load_program(FILE *p) {
-    struct pcb *pcb = (struct pcb *) malloc(sizeof(struct pcb));
-    pcb->start = program_memory_counter;
-    pcb->pc = 0;
-    pcb->length = 0;
-    pcb->next = NULL;
-    size_t line_buf = 0; // will get resized by getline call
-
-    while (1) {
-        char *line = NULL;
-        ssize_t line_len = getline(&line, &line_buf, p);
-        if (line_len == -1) {
-            break;
-        }
-        if (line_len > 0 && line[line_len - 1] == '\n') {
-            line[line_len - 1] = '\0';
-        }
-
-        mem_set_program_line(line);
-        pcb->length++;
-        free(line);
-    }
-
-    return pcb;
+void free_program_line(int index) {
+    free(program_memory[index].line);
+    program_memory[index].line = NULL;
 }
