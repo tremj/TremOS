@@ -1,2 +1,0 @@
-echo helloset2
-echo byeset2

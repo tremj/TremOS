@@ -42,6 +42,10 @@ int badcommandFolderDoesNotExist();
 
 // Interpret commands and their arguments
 int interpreter(char *command_args[], int args_size) {
+
+//    for (int i = 0; i < args_size; i++) {
+//        printf("arg[%d] = '%s'\n", i, command_args[i]);
+//    }
     int i;
 
     if (args_size < 1 || args_size > MAX_ARGS_SIZE) {
@@ -367,8 +371,9 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy) {
     }
 
     int i = 0;
-    while (files[i] != NULL) {
-        FILE *p = fopen(files[i], "rt");      // the program is in a file
+    while (i < 3 && files[i] != NULL) {
+//        printf("%s\n", files[i]);
+        FILE *p = fopen(files[i], "rt");
 
         if (p == NULL) {
             return badcommandFileDoesNotExist();
@@ -387,6 +392,7 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy) {
 
     run_scheduler(pcbs, i, policy);
 
+    i--; // i is count not index
     while (i >= 0) {
         free(pcbs[i]);
         i--;
