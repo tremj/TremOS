@@ -34,6 +34,7 @@ struct pcb *init_pcb(FILE *p) {
     }
 
     pcb->pid = next_pid++;
+    pcb->length_score = pcb->length;
     return pcb;
 }
 

@@ -1,7 +1,7 @@
 #include <stdio.h>
 
 struct pcb {
-    int start, length, pid, pc;
+    int start, length, length_score, pid, pc;
     struct pcb *next;
 };
 
