@@ -72,13 +72,24 @@ struct scheduler *prepare_scheduler(struct pcb **pcbs, int count, char *schedule
     return s;
 }
 
-void queue_pcbs(struct scheduler *s, struct pcb **pcbs, int count) {
-    for (int i = 0; i < count; i++) {
-        enqueue_process(s->queue, pcbs[i]);
+void SJF_AGING_insert(struct scheduler *s, struct pcb *pcb) {
+    struct pcb *prev = NULL;
+    struct pcb *curr = s->queue->head;
+    while (curr != NULL && pcb->length_score > curr->length_score) {
+        prev = curr;
+        curr = curr->next;
     }
 
-    if (s->scheduler_type == SJF || s->scheduler_type == AGING) {
-        SJF_AGING_ordering(pcbs, count, sizeof(struct pcb *), compare_pcbs);
+    insert_between(s->queue, pcb, prev, curr);
+}
+
+void queue_pcbs(struct scheduler *s, struct pcb **pcbs, int count) {
+    for (int i = 0; i < count; i++) {
+        if (s->scheduler_type == SJF || s->scheduler_type == AGING) {
+            SJF_AGING_insert(s, pcbs[i]);
+        } else {
+            enqueue_process(s->queue, pcbs[i]);
+        }
     }
 }
 
@@ -113,15 +124,15 @@ void run_scheduler(struct scheduler *s) {
 #define PROCESS_REMOVED 1
 
 int run_next_instruction(struct scheduler *s) {
-    struct pcb *p = s->queue->head;
-    char *line = mem_get_program_line(p->pc++);
+    struct pcb *pcb = dequeue_process(s->queue);
+    char *line = mem_get_program_line(pcb->pc++);
     parseInput(line);
-    if (p->start + p->length == p->pc) { // end of program
-        cleanup_code(p);
-        struct pcb *pcb = dequeue_process(s->queue);
+    if (pcb->start + pcb->length == pcb->pc) { // end of program
+        cleanup_code(pcb);
         free(pcb);
         return PROCESS_REMOVED;
     }
+    skip_queue(s->queue, pcb);
     return LINE_EXECUTED;
 }
 
@@ -142,16 +153,9 @@ void age_jobs(struct scheduler *s) {
         tmp = tmp->next;
     }
 
-    struct pcb *curr_exec = dequeue_process(s->queue);
+    struct pcb *pcb = dequeue_process(s->queue);
 
-    struct pcb *prev = NULL;
-    struct pcb *curr = s->queue->head;
-    while (curr != NULL && curr_exec->length_score > curr->length_score) {
-        prev = curr;
-        curr = curr->next;
-    }
-
-    insert_between(s->queue, curr_exec, prev, curr);
+    SJF_AGING_insert(s, pcb);
 }
 
 void SJF_scheduling(struct scheduler *s, int enable_aging) {
