@@ -51,6 +51,10 @@ struct scheduler *init_scheduler(char *scheduler_type) {
     return s;
 }
 
+void SJF_AGING_ordering(struct pcb **pcbs, int count, size_t data_size, int (*comparator)(const void *, const void *)) {
+    qsort(pcbs, count, data_size, comparator);
+}
+
 struct scheduler *prepare_scheduler(struct pcb **pcbs, int count, char *scheduler_type) {
     struct scheduler *s = init_scheduler(scheduler_type);
     if (s == NULL) {
@@ -58,7 +62,7 @@ struct scheduler *prepare_scheduler(struct pcb **pcbs, int count, char *schedule
     }
 
     if (s->scheduler_type == SJF || s->scheduler_type == AGING) {
-        qsort(pcbs, count, sizeof(struct pcb *), compare_pcbs);
+        SJF_AGING_ordering(pcbs, count, sizeof(struct pcb *), compare_pcbs);
     }
 
     for (int i = 0; i < count; i++) {
@@ -68,14 +72,21 @@ struct scheduler *prepare_scheduler(struct pcb **pcbs, int count, char *schedule
     return s;
 }
 
-
-void run_scheduler(struct pcb **pcbs, int count, char *scheduler_type) {
-    struct scheduler *s = prepare_scheduler(pcbs, count, scheduler_type);
-    if (s == NULL) {
-        printf("Something went wrong!!\n");
-        return;
+void queue_pcbs(struct scheduler *s, struct pcb **pcbs, int count) {
+    for (int i = 0; i < count; i++) {
+        enqueue_process(s->queue, pcbs[i]);
     }
 
+    if (s->scheduler_type == SJF || s->scheduler_type == AGING) {
+        SJF_AGING_ordering(pcbs, count, sizeof(struct pcb *), compare_pcbs);
+    }
+}
+
+void prioritize_pcb(struct scheduler *s, struct pcb *pcb) {
+    skip_queue(s->queue, pcb);
+}
+
+void run_scheduler(struct scheduler *s) {
     int enable_aging = NO_AGING;
     int instr_per_turn = RR_DEFAULT;
     switch (s->scheduler_type) {
@@ -96,9 +107,6 @@ void run_scheduler(struct pcb **pcbs, int count, char *scheduler_type) {
     }
 
     program_memory_counter = 0;
-
-    free(s->queue);
-    free(s);
 }
 
 #define LINE_EXECUTED 0
@@ -106,15 +114,15 @@ void run_scheduler(struct pcb **pcbs, int count, char *scheduler_type) {
 
 int run_next_instruction(struct scheduler *s) {
     struct pcb *p = s->queue->head;
+    char *line = mem_get_program_line(p->pc++);
+    parseInput(line);
     if (p->start + p->length == p->pc) { // end of program
         cleanup_code(p);
-        dequeue_process(s->queue);
+        struct pcb *pcb = dequeue_process(s->queue);
+        free(pcb);
         return PROCESS_REMOVED;
-    } else {
-        char *line = mem_get_program_line(p->pc++);
-        parseInput(line);
-        return LINE_EXECUTED;
     }
+    return LINE_EXECUTED;
 }
 
 void FCFS_scheduling(struct scheduler *s) {
@@ -124,7 +132,8 @@ void FCFS_scheduling(struct scheduler *s) {
 }
 
 void age_jobs(struct scheduler *s) {
-    struct pcb *curr_exec_pcb = s->queue->head;
+    // already more than 1 job in queue
+    // it was checked before calling the function
     struct pcb *tmp = s->queue->head->next;
     for (int i = 1; i < s->queue->size; i++) {
         if (tmp->length_score > 0) {
@@ -133,17 +142,22 @@ void age_jobs(struct scheduler *s) {
         tmp = tmp->next;
     }
 
-    struct pcb *next_pcb = curr_exec_pcb->next;
-    if (next_pcb != NULL && next_pcb->length_score < curr_exec_pcb->length_score) {
-        dequeue_process(s->queue);
-        enqueue_process(s->queue, curr_exec_pcb);
+    struct pcb *curr_exec = dequeue_process(s->queue);
+
+    struct pcb *prev = NULL;
+    struct pcb *curr = s->queue->head;
+    while (curr != NULL && curr_exec->length_score > curr->length_score) {
+        prev = curr;
+        curr = curr->next;
     }
+
+    insert_between(s->queue, curr_exec, prev, curr);
 }
 
 void SJF_scheduling(struct scheduler *s, int enable_aging) {
     while (s->queue->size > 0) {
-        run_next_instruction(s);
-        if (enable_aging == ENABLE_AGING && s->queue->size > 1) {
+        int status = run_next_instruction(s);
+        if (status != PROCESS_REMOVED && enable_aging == ENABLE_AGING && s->queue->size > 1) {
             age_jobs(s);
         }
     }
@@ -155,16 +169,22 @@ void rotate_jobs(struct scheduler *s) {
 }
 
 void RR_scheduling(struct scheduler *s, int instr_per_turn) {
+    int status;
     while (s->queue->size > 0) {
         for (int i = 0; i < instr_per_turn; i++) {
-            int status = run_next_instruction(s);
+            status = run_next_instruction(s);
             if (status == PROCESS_REMOVED) {
                 break;
             }
         }
 
-        if (s->queue->size > 1) {
+        if (status != PROCESS_REMOVED && s->queue->size > 1) {
             rotate_jobs(s);
         }
     }
+}
+
+void free_scheduler(struct scheduler *s) {
+    free_queue(s->queue);
+    free(s);
 }

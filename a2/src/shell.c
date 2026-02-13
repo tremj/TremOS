@@ -28,14 +28,14 @@ int main(int argc, char *argv[]) {
     //init shell memory
     mem_init();
     while(1) {							
-	if (isatty(STDIN_FILENO)) {
-            printf("%c ", prompt);
-	}
+        if (isatty(STDIN_FILENO)) {
+                printf("%c ", prompt);
+        }
         // here you should check the unistd library 
         // so that you can find a way to not display $ in the batch mode
         if (fgets(userInput, MAX_USER_INPUT-1, stdin) == NULL) {
-	    break;
-	}
+            break;
+        }
         errorCode = parseInput(userInput);
         if (errorCode == -1) exit(99);	// ignore all other errors
         memset(userInput, 0, sizeof(userInput));

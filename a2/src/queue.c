@@ -44,3 +44,28 @@ struct pcb *dequeue_process(struct ready_queue *queue) {
         return tmp;
     }
 }
+
+void skip_queue(struct ready_queue *queue, struct pcb *pcb) {
+    pcb->next = queue->head;
+    queue->head = pcb;
+    queue->size++;
+}
+
+void insert_between(struct ready_queue *queue, struct pcb *pcb_insert, struct pcb *pcb_prev, struct pcb *pcb_next) {
+    if (pcb_prev == NULL) { // head
+        skip_queue(queue, pcb_insert);
+    } else if (pcb_next == NULL) { // tail
+        enqueue_process(queue, pcb_insert);
+    } else {
+        pcb_insert->next = pcb_next;
+        pcb_prev->next = pcb_insert;
+        queue->size++;
+    }
+}
+
+void free_queue(struct ready_queue *queue) {
+    while (queue->size > 0) {
+        free(dequeue_process(queue));
+    }
+    free(queue);
+}

@@ -11,7 +11,11 @@
 #include "shellmemory.h"
 #include "shell.h"
 
+#define BG_DISABLED 0
+#define BG_ENABLED 1
+
 int MAX_ARGS_SIZE = 7;
+struct scheduler *scheduler = NULL;
 
 int badcommand() {
     printf("Unknown Command\n");
@@ -36,16 +40,12 @@ int my_mkdir(char *dirName);
 int my_touch(char *fileName);
 int my_cd(char *dirName);
 int run(char *command_args[], int args_size);
-int exec(char *filename1, char *filename2, char *filename3, char *policy);
+int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode);
 int badcommandFileDoesNotExist();
 int badcommandFolderDoesNotExist();
 
 // Interpret commands and their arguments
 int interpreter(char *command_args[], int args_size) {
-
-//    for (int i = 0; i < args_size; i++) {
-//        printf("arg[%d] = '%s'\n", i, command_args[i]);
-//    }
     int i;
 
     if (args_size < 1 || args_size > MAX_ARGS_SIZE) {
@@ -115,11 +115,18 @@ int interpreter(char *command_args[], int args_size) {
         }
         return run(command_args + 1, args_size - 1);
     } else if (strcmp(command_args[0], "exec") == 0) {
-        if (args_size <= 1 || args_size > 5) {
+        if (args_size <= 1 || args_size > 6) {
             return badcommand();
         }
+
+        int background_mode = BG_DISABLED;
         if (args_size == 2) {
-            return exec(command_args[1], NULL, NULL, "FCFS");
+            return exec(command_args[1], NULL, NULL, "FCFS", background_mode);
+        }
+
+        if (strcmp(command_args[args_size - 1], "#") == 0) {
+            background_mode = BG_ENABLED;
+            args_size--;
         }
 
         char *policy = command_args[args_size - 1];
@@ -133,14 +140,13 @@ int interpreter(char *command_args[], int args_size) {
         }
 
         if (args_size == 3) {
-            return exec(command_args[1], NULL, NULL, policy);
+            return exec(command_args[1], NULL, NULL, policy, background_mode);
         } else if (args_size == 4) {
-            return exec(command_args[1], command_args[2], NULL, policy);
+            return exec(command_args[1], command_args[2], NULL, policy, background_mode);
         } else {
-            return exec(command_args[1], command_args[2], command_args[3], policy);
+            return exec(command_args[1], command_args[2], command_args[3], policy, background_mode);
         }
     } else {
-        printf("here\n");
         return badcommand();
     }
 }
@@ -198,7 +204,8 @@ int source(char *script) {
     struct pcb *pcb = init_pcb(p);
     fclose(p);
 
-    run_scheduler(&pcb, 1, "FCFS");
+    struct scheduler *s = prepare_scheduler(&pcb, 1, "FCFS");
+    run_scheduler(s);
 
     return errCode;
 }
@@ -356,7 +363,7 @@ int compare_filenames(char *f1, char *f2, char *f3) {
     return 1;
 }
 
-int exec(char *filename1, char *filename2, char *filename3, char *policy) {
+int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode) {
     int errCode = 0;
     if (compare_filenames(filename1, filename2, filename3) == 0) {
         printf("Filenames must be unique!\n");
@@ -364,15 +371,15 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy) {
     }
 
     char *files[3] = {filename1, filename2, filename3};
-    struct pcb **pcbs = (struct pcb **)malloc(3 * sizeof(struct pcb *));
+    struct pcb **pcbs = (struct pcb **)malloc(4 * sizeof(struct pcb *));
     if (pcbs == NULL) {
         printf("Something went wrong!!\n");
         return errCode;
     }
 
+    // normal file loading & pcb creating
     int i = 0;
     while (i < 3 && files[i] != NULL) {
-//        printf("%s\n", files[i]);
         FILE *p = fopen(files[i], "rt");
 
         if (p == NULL) {
@@ -390,15 +397,24 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy) {
         i++;
     }
 
-    run_scheduler(pcbs, i, policy);
+    if (scheduler != NULL) {
+        queue_pcbs(scheduler, pcbs, i);
+    } else {
+        if (scheduler == NULL) {
+            scheduler = prepare_scheduler(pcbs, i, policy);
+        }
 
-    i--; // i is count not index
-    while (i >= 0) {
-        free(pcbs[i]);
-        i--;
+        if (bg_mode == BG_ENABLED) {
+            struct pcb *batch_pcb = init_pcb(stdin);
+            prioritize_pcb(scheduler, batch_pcb);
+            i++;
+        }
     }
 
-    free(pcbs);
+    run_scheduler(scheduler);
+
+    free_scheduler(scheduler);
+    scheduler = NULL;
 
     return errCode;
 }
