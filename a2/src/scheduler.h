@@ -1,6 +1,9 @@
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
+#define MT_DISABLED 0
+#define MT_ENABLED 1
+
 struct ready_queue;
 struct pcb;
 

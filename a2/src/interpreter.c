@@ -6,7 +6,6 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <unistd.h>
-#include "interpreter.h"
 #include "pcb.h"
 #include "scheduler.h"
 #include "shellmemory.h"
