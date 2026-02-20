@@ -17,6 +17,7 @@ echo "== Running tests =="
 echo
 
 FAILURES=0
+FAILED_TESTS=()
 
 cd "$TEST_DIR"
 
@@ -40,12 +41,49 @@ for testfile in T_*.txt; do
 
     PASS=false
 
-    if [[ -f "$expected1" ]] && diff -q "$expected1" "$output" > /dev/null; then
-        PASS=true
-    fi
+    # -----------------------------
+    # Special handling for MT tests
+    # -----------------------------
+    if [[ "$base" == T_MT* ]]; then
+        if [[ -f "$expected1" ]]; then
+            PASS=true
 
-    if [[ "$PASS" = false && -f "$expected2" ]] && diff -q "$expected2" "$output" > /dev/null; then
-        PASS=true
+            # For each unique line in expected result
+            while IFS= read -r line; do
+                expected_count=$(grep -Fx "$line" "$expected1" | wc -l)
+                actual_count=$(grep -Fx "$line" "$output" | wc -l)
+
+                if [[ "$expected_count" -ne "$actual_count" ]]; then
+                    PASS=false
+                    break
+                fi
+            done < <(sort -u "$expected1")
+
+            # Also ensure output doesn't contain extra unexpected lines
+            if [[ "$PASS" = true ]]; then
+                while IFS= read -r line; do
+                    expected_count=$(grep -Fx "$line" "$expected1" | wc -l)
+                    actual_count=$(grep -Fx "$line" "$output" | wc -l)
+
+                    if [[ "$expected_count" -ne "$actual_count" ]]; then
+                        PASS=false
+                        break
+                    fi
+                done < <(sort -u "$output")
+            fi
+        fi
+
+    else
+        # -----------------------------
+        # Normal ordered tests
+        # -----------------------------
+        if [[ -f "$expected1" ]] && diff -q "$expected1" "$output" > /dev/null; then
+            PASS=true
+        fi
+
+        if [[ "$PASS" = false && -f "$expected2" ]] && diff -q "$expected2" "$output" > /dev/null; then
+            PASS=true
+        fi
     fi
 
     if [[ "$PASS" = true ]]; then

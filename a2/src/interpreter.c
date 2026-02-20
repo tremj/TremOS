@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <unistd.h>
+#include "interpreter.h"
 #include "pcb.h"
 #include "scheduler.h"
 #include "shellmemory.h"
@@ -40,7 +41,7 @@ int my_mkdir(char *dirName);
 int my_touch(char *fileName);
 int my_cd(char *dirName);
 int run(char *command_args[], int args_size);
-int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode);
+int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode, int mt_mode);
 int badcommandFileDoesNotExist();
 int badcommandFolderDoesNotExist();
 
@@ -120,8 +121,14 @@ int interpreter(char *command_args[], int args_size) {
         }
 
         int background_mode = BG_DISABLED;
+        int multithreaded = MT_DISABLED;
         if (args_size == 2) {
-            return exec(command_args[1], NULL, NULL, "FCFS", background_mode);
+            return exec(command_args[1], NULL, NULL, "FCFS", background_mode, multithreaded);
+        }
+
+        if (strcmp(command_args[args_size - 1], "MT") == 0) {
+            multithreaded = MT_ENABLED;
+            args_size--;
         }
 
         if (strcmp(command_args[args_size - 1], "#") == 0) {
@@ -140,11 +147,11 @@ int interpreter(char *command_args[], int args_size) {
         }
 
         if (args_size == 3) {
-            return exec(command_args[1], NULL, NULL, policy, background_mode);
+            return exec(command_args[1], NULL, NULL, policy, background_mode, multithreaded);
         } else if (args_size == 4) {
-            return exec(command_args[1], command_args[2], NULL, policy, background_mode);
+            return exec(command_args[1], command_args[2], NULL, policy, background_mode, multithreaded);
         } else {
-            return exec(command_args[1], command_args[2], command_args[3], policy, background_mode);
+            return exec(command_args[1], command_args[2], command_args[3], policy, background_mode, multithreaded);
         }
     } else {
         return badcommand();
@@ -166,6 +173,9 @@ source SCRIPT.TXT	Executes the file SCRIPT.TXT\n ";
 
 int quit() {
     printf("Bye!\n");
+    if (scheduler != NULL && scheduler->mt_mode == MT_ENABLED) {
+        return 0;
+    }
     exit(0);
 }
 
@@ -204,8 +214,11 @@ int source(char *script) {
     struct pcb *pcb = init_pcb(p);
     fclose(p);
 
-    struct scheduler *s = prepare_scheduler(&pcb, 1, "FCFS");
-    run_scheduler(s);
+    scheduler = prepare_scheduler(&pcb, 1, "FCFS", MT_DISABLED);
+    run_scheduler(scheduler);
+
+    free_scheduler(scheduler);
+    scheduler = NULL;
 
     return errCode;
 }
@@ -238,7 +251,6 @@ int compareNames(const void *a, const void *b) {
 
     return strcmp(strA, strB);
 }
-
 
 int my_ls() {
     int errCode = 0;
@@ -363,7 +375,7 @@ int compare_filenames(char *f1, char *f2, char *f3) {
     return 1;
 }
 
-int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode) {
+int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode, int mt_mode) {
     int errCode = 0;
     if (compare_filenames(filename1, filename2, filename3) == 0) {
         printf("Filenames must be unique!\n");
@@ -398,23 +410,23 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg
     }
 
     if (scheduler != NULL) {
+        lock_scheduler();
         queue_pcbs(scheduler, pcbs, i);
+        unlock_scheduler();
     } else {
-        if (scheduler == NULL) {
-            scheduler = prepare_scheduler(pcbs, i, policy);
-        }
+        scheduler = prepare_scheduler(pcbs, i, policy, mt_mode);
 
         if (bg_mode == BG_ENABLED) {
             struct pcb *batch_pcb = init_pcb(stdin);
             prioritize_pcb(scheduler, batch_pcb);
             i++;
         }
+
+        run_scheduler(scheduler);
+
+        free_scheduler(scheduler);
+        scheduler = NULL;
     }
-
-    run_scheduler(scheduler);
-
-    free_scheduler(scheduler);
-    scheduler = NULL;
 
     return errCode;
 }

@@ -1,9 +1,11 @@
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h> 
 #include <unistd.h>
-#include "shell.h"
 #include "interpreter.h"
+#include "scheduler.h"
+#include "shell.h"
 #include "shellmemory.h"
 #include "queue.h"
 
@@ -12,6 +14,7 @@ int parseInput(char ui[]);
 // Start of everything
 int main(int argc, char *argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
+    init_scheduler_lock();
     printf("Shell version 1.5 created Dec 2025\n");
 
     init_queue();
@@ -37,10 +40,14 @@ int main(int argc, char *argv[]) {
             break;
         }
         errorCode = parseInput(userInput);
-        if (errorCode == -1) exit(99);	// ignore all other errors
+        if (errorCode == -1) {
+            destroy_scheduler_lock();
+            exit(99);    // ignore all other errors
+        }
         memset(userInput, 0, sizeof(userInput));
     }
 
+    destroy_scheduler_lock();
     return 0;
 }
 

@@ -1,6 +1,8 @@
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "interpreter.h"
 #include "pcb.h"
 #include "queue.h"
 #include "scheduler.h"
@@ -24,7 +26,26 @@ void SJF_scheduling(struct scheduler *s, int enable_aging);
 void RR_scheduling(struct scheduler *s, int instr_per_turn);
 
 
-struct scheduler *init_scheduler(char *scheduler_type) {
+pthread_mutex_t scheduler_lock;
+
+void init_scheduler_lock() {
+    pthread_mutex_init(&scheduler_lock, NULL);
+}
+
+void destroy_scheduler_lock() {
+    pthread_mutex_destroy(&scheduler_lock);
+}
+
+void lock_scheduler() {
+    pthread_mutex_lock(&scheduler_lock);
+}
+
+void unlock_scheduler() {
+    pthread_mutex_unlock(&scheduler_lock);
+}
+
+
+struct scheduler *init_scheduler(char *scheduler_type, int mt_mode) {
     struct scheduler *s = (struct scheduler *) malloc(sizeof(struct scheduler));
     if (s == NULL) {
         return NULL;
@@ -48,6 +69,9 @@ struct scheduler *init_scheduler(char *scheduler_type) {
         return NULL;
     }
 
+    s->mt_mode = mt_mode;
+    pthread_mutex_init(&scheduler_lock, NULL);
+
     return s;
 }
 
@@ -55,8 +79,8 @@ void SJF_AGING_ordering(struct pcb **pcbs, int count, size_t data_size, int (*co
     qsort(pcbs, count, data_size, comparator);
 }
 
-struct scheduler *prepare_scheduler(struct pcb **pcbs, int count, char *scheduler_type) {
-    struct scheduler *s = init_scheduler(scheduler_type);
+struct scheduler *prepare_scheduler(struct pcb **pcbs, int count, char *scheduler_type, int mt_mode) {
+    struct scheduler *s = init_scheduler(scheduler_type, mt_mode);
     if (s == NULL) {
         return NULL;
     }
@@ -118,73 +142,130 @@ void run_scheduler(struct scheduler *s) {
     }
 
     program_memory_counter = 0;
+    pthread_mutex_destroy(&scheduler_lock);
+}
+
+void cleanup_pcb(struct pcb *pcb) {
+    cleanup_code(pcb);
+    free(pcb);
 }
 
 #define LINE_EXECUTED 0
 #define PROCESS_REMOVED 1
 
-int run_next_instruction(struct scheduler *s) {
-    struct pcb *pcb = dequeue_process(s->queue);
+int run_next_instruction(struct pcb *pcb, int mt_mode) {
     char *line = mem_get_program_line(pcb->pc++);
     parseInput(line);
     if (pcb->start + pcb->length == pcb->pc) { // end of program
-        cleanup_code(pcb);
-        free(pcb);
         return PROCESS_REMOVED;
     }
-    skip_queue(s->queue, pcb);
     return LINE_EXECUTED;
 }
 
 void FCFS_scheduling(struct scheduler *s) {
     while (s->queue->size > 0) {
-        run_next_instruction(s);
+        struct pcb *pcb = dequeue_process(s->queue);
+        int status;
+        do {
+            status = run_next_instruction(pcb, MT_DISABLED);
+        } while (status != PROCESS_REMOVED);
+
+        cleanup_pcb(pcb);
     }
 }
 
-void age_jobs(struct scheduler *s) {
+void age_jobs(struct scheduler *s, struct pcb *pcb) {
     // already more than 1 job in queue
     // it was checked before calling the function
-    struct pcb *tmp = s->queue->head->next;
-    for (int i = 1; i < s->queue->size; i++) {
+    struct pcb *tmp = s->queue->head;
+    for (int i = 0; i < s->queue->size; i++) {
         if (tmp->length_score > 0) {
             tmp->length_score--;
         }
         tmp = tmp->next;
     }
 
-    struct pcb *pcb = dequeue_process(s->queue);
-
     SJF_AGING_insert(s, pcb);
 }
 
 void SJF_scheduling(struct scheduler *s, int enable_aging) {
     while (s->queue->size > 0) {
-        int status = run_next_instruction(s);
-        if (status != PROCESS_REMOVED && enable_aging == ENABLE_AGING && s->queue->size > 1) {
-            age_jobs(s);
+        struct pcb *pcb = dequeue_process(s->queue);
+        if (enable_aging == NO_AGING) {
+            while (run_next_instruction(pcb, MT_DISABLED) != PROCESS_REMOVED);
+            cleanup_pcb(pcb);
+        } else {
+            int status = run_next_instruction(pcb, MT_DISABLED);
+            if (status == PROCESS_REMOVED) {
+                cleanup_pcb(pcb);
+            } else {
+                age_jobs(s, pcb);
+            }
         }
     }
 }
 
-void rotate_jobs(struct scheduler *s) {
-    struct pcb *p = dequeue_process(s->queue);
-    enqueue_process(s->queue, p);
+void RR_run_instructions(struct scheduler *s, int instr_per_turn, struct pcb *pcb, int mt_mode) {
+    int status;
+    for (int i = 0; i < instr_per_turn; i++) {
+        status = run_next_instruction(pcb, mt_mode);
+        if (status == PROCESS_REMOVED) {
+            cleanup_pcb(pcb);
+            break;
+        }
+    }
+
+    if (mt_mode == MT_ENABLED) {
+        lock_scheduler();
+    }
+    if (status == LINE_EXECUTED) {
+        enqueue_process(s->queue, pcb);
+    }
+    if (mt_mode == MT_ENABLED) {
+        unlock_scheduler();
+    }
+}
+
+pthread_t thread1, thread2;
+
+void *RR_thread(void *scheduler) {
+    int instr_per_turn = RR_DEFAULT;
+    // no need to lock scheduler, field will not be changed
+    if (((struct scheduler *)scheduler)->scheduler_type == RR30) {
+        instr_per_turn = RR30_INSTR;
+    }
+
+    while (1) {
+        pthread_mutex_lock(&scheduler_lock);
+        if (((struct scheduler *)scheduler)->queue->size == 0) {
+            pthread_mutex_unlock(&scheduler_lock);
+            break;
+        }
+        struct pcb *pcb = dequeue_process(((struct scheduler *)scheduler)->queue);
+        pthread_mutex_unlock(&scheduler_lock);
+
+        RR_run_instructions(scheduler, instr_per_turn, pcb, MT_ENABLED);
+    }
+
+    return NULL;
 }
 
 void RR_scheduling(struct scheduler *s, int instr_per_turn) {
-    int status;
-    while (s->queue->size > 0) {
-        for (int i = 0; i < instr_per_turn; i++) {
-            status = run_next_instruction(s);
-            if (status == PROCESS_REMOVED) {
-                break;
-            }
-        }
+    if (s->mt_mode == MT_ENABLED) {
+        lock_scheduler();
+        pthread_create(&thread1, NULL, RR_thread, s);
+        pthread_create(&thread2, NULL, RR_thread, s);
+    }
 
-        if (status != PROCESS_REMOVED && s->queue->size > 1) {
-            rotate_jobs(s);
-        }
+    while (s->mt_mode == MT_DISABLED && s->queue->size > 0) {
+        struct pcb *pcb = dequeue_process(s->queue);
+        RR_run_instructions(s, instr_per_turn, pcb, s->mt_mode);
+    }
+
+    if (s->mt_mode == MT_ENABLED) {
+        unlock_scheduler();
+        pthread_join(thread1, NULL);
+        pthread_join(thread2, NULL);
     }
 }
 
