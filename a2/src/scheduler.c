@@ -69,7 +69,6 @@ struct scheduler *init_scheduler(char *scheduler_type, int mt_mode) {
     }
 
     s->mt_mode = mt_mode;
-    pthread_mutex_init(&scheduler_lock, NULL);
 
     return s;
 }
