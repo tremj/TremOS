@@ -6,7 +6,8 @@
 
 int next_pid = 1;
 
-
+// function reads a FILE * struct line by line and adds each line to the
+// shell memory program line array
 struct pcb *init_pcb(FILE *p) {
     struct pcb *pcb = (struct pcb *) malloc(sizeof(struct pcb));
     if (pcb == NULL) {
@@ -38,12 +39,14 @@ struct pcb *init_pcb(FILE *p) {
     return pcb;
 }
 
+// cleaning up PCB code lines stored in program line memory
 void cleanup_code(struct pcb *pcb) {
     for (int i = pcb->start; i < pcb->start + pcb->length; i++) {
         free_program_line(i);
     }
 }
 
+// comparator helper function for initial sorting
 int compare_pcbs(const void *a, const void *b) {
     const struct pcb *pcbA = *(const struct pcb **)a;
     const struct pcb *pcbB = *(const struct pcb **)b;

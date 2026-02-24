@@ -4,7 +4,7 @@
 #include "queue.h"
 #include "shellmemory.h"
 
-
+// create an empty queue
 struct ready_queue *init_queue() {
     struct ready_queue *queue = (struct ready_queue *)malloc(sizeof(struct ready_queue));
     if (queue == NULL) {
@@ -45,12 +45,14 @@ struct pcb *dequeue_process(struct ready_queue *queue) {
     }
 }
 
+// prioritizes the PCB to the head of the queue
 void skip_queue(struct ready_queue *queue, struct pcb *pcb) {
     pcb->next = queue->head;
     queue->head = pcb;
     queue->size++;
 }
 
+// helper function to insert PCB between 2 PCB "nodes"
 void insert_between(struct ready_queue *queue, struct pcb *pcb_insert, struct pcb *pcb_prev, struct pcb *pcb_next) {
     if (pcb_prev == NULL) { // head
         skip_queue(queue, pcb_insert);
@@ -63,9 +65,10 @@ void insert_between(struct ready_queue *queue, struct pcb *pcb_insert, struct pc
     }
 }
 
+// helper function to free any allocated memory in queue
 void free_queue(struct ready_queue *queue) {
     while (queue->size > 0) {
-        free(dequeue_process(queue));
+        cleanup_code(dequeue_process(queue));
     }
     free(queue);
 }

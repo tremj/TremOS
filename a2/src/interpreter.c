@@ -115,26 +115,32 @@ int interpreter(char *command_args[], int args_size) {
         }
         return run(command_args + 1, args_size - 1);
     } else if (strcmp(command_args[0], "exec") == 0) {
-        if (args_size <= 1 || args_size > 6) {
+        if (args_size <= 1 || args_size > 7) {
             return badcommand();
         }
 
+        // default values for configurable options
         int background_mode = BG_DISABLED;
         int multithreaded = MT_DISABLED;
+
+        // exec program handling
         if (args_size == 2) {
             return exec(command_args[1], NULL, NULL, "FCFS", background_mode, multithreaded);
         }
 
+        // MT appears at the end, check if it is last argument and set options
         if (strcmp(command_args[args_size - 1], "MT") == 0) {
             multithreaded = MT_ENABLED;
             args_size--;
         }
 
+        // '#' appears before last, check if it is and set options
         if (strcmp(command_args[args_size - 1], "#") == 0) {
             background_mode = BG_ENABLED;
             args_size--;
         }
 
+        // determine if scheduling policy is valid
         char *policy = command_args[args_size - 1];
         if (strcmp(policy, "FCFS") != 0 &&
             strcmp(policy, "SJF") != 0 &&
@@ -145,6 +151,7 @@ int interpreter(char *command_args[], int args_size) {
             return badcommand();
         }
 
+        // execute the remaining command arguments with the options collected
         if (args_size == 3) {
             return exec(command_args[1], NULL, NULL, policy, background_mode, multithreaded);
         } else if (args_size == 4) {
@@ -172,6 +179,8 @@ source SCRIPT.TXT	Executes the file SCRIPT.TXT\n ";
 
 int quit() {
     printf("Bye!\n");
+    // if exit is called in thread, it will kill entire process
+    // must return 0 when quit is called in MT mode
     if (scheduler != NULL && scheduler->mt_mode == MT_ENABLED) {
         return 0;
     }
@@ -210,13 +219,16 @@ int source(char *script) {
         return badcommandFileDoesNotExist();
     }
 
+    // create PCB from FILE
     struct pcb *pcb = init_pcb(p);
     fclose(p);
 
+    // simple FCFS run
     scheduler = prepare_scheduler(&pcb, 1, "FCFS", MT_DISABLED);
     run_scheduler(scheduler);
 
     free_scheduler(scheduler);
+    // important for subsequent exec/source calls
     scheduler = NULL;
 
     return errCode;
@@ -367,6 +379,7 @@ int run(char *command_args[], int args_size) {
    return errCode;
 }
 
+// ensures all filenames are unique
 int compare_filenames(char *f1, char *f2, char *f3) {
     if (f1 && f2 && strcmp(f1, f2) == 0) return 0;
     if (f1 && f3 && strcmp(f1, f3) == 0) return 0;
@@ -382,7 +395,7 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg
     }
 
     char *files[3] = {filename1, filename2, filename3};
-    struct pcb **pcbs = (struct pcb **)malloc(4 * sizeof(struct pcb *));
+    struct pcb **pcbs = (struct pcb **)malloc(3 * sizeof(struct pcb *)); // at most 3 PCBs from exec command
     if (pcbs == NULL) {
         printf("Something went wrong!!\n");
         return errCode;
@@ -390,7 +403,7 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg
 
     // normal file loading & pcb creating
     int i = 0;
-    while (i < 3 && files[i] != NULL) {
+    while (i < 3 && files[i] != NULL) { // loop is similar to the collection from the source function
         FILE *p = fopen(files[i], "rt");
 
         if (p == NULL) {
@@ -409,6 +422,8 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg
     }
 
     if (scheduler != NULL) {
+        // important branch for when exec is called after scheduler is already created
+        // up in call stack would be another call to exec and run_scheduler is waiting to return
         lock_scheduler();
         queue_pcbs(scheduler, pcbs, i);
         unlock_scheduler();
@@ -416,14 +431,16 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg
         scheduler = prepare_scheduler(pcbs, i, policy, mt_mode);
 
         if (bg_mode == BG_ENABLED) {
+            // init_pcb takes in FILE * struct, stdin is a FILE * object
+            // stdin works on init_pcb as a FILE * would
             struct pcb *batch_pcb = init_pcb(stdin);
-            prioritize_pcb(scheduler, batch_pcb);
-            i++;
+            prioritize_pcb(scheduler, batch_pcb); // add batch program to head of queue
         }
 
         run_scheduler(scheduler);
 
         free_scheduler(scheduler);
+        // set to NULL for subsequent exec calls
         scheduler = NULL;
     }
 

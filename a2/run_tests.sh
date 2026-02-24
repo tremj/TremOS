@@ -97,8 +97,14 @@ for testfile in T_*.txt; do
     rm "$output"
 done
 
+echo "== Cleaning up Shell =="
+cd "../$SRC_DIR"
+make clean
+echo "Done cleanup!"
+
 echo
 echo "== Test Summary =="
+cd "../$TEST_DIR"
 echo "Passed: $(( $(ls T_*.txt 2>/dev/null | grep -v '_result' | wc -l) - FAILURES ))"
 echo "Failed: $FAILURES"
 

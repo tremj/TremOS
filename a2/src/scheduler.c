@@ -27,6 +27,10 @@ void RR_scheduling(struct scheduler *s, int instr_per_turn);
 
 pthread_mutex_t scheduler_lock;
 
+
+// collection of 4 functions that allows lock to be
+// locked from anywhere that includes the scheduler.h
+// header file
 void init_scheduler_lock() {
     pthread_mutex_init(&scheduler_lock, NULL);
 }
@@ -44,6 +48,7 @@ void unlock_scheduler() {
 }
 
 
+// create an empty scheduler struct
 struct scheduler *init_scheduler(char *scheduler_type, int mt_mode) {
     struct scheduler *s = (struct scheduler *) malloc(sizeof(struct scheduler));
     if (s == NULL) {
@@ -73,10 +78,13 @@ struct scheduler *init_scheduler(char *scheduler_type, int mt_mode) {
     return s;
 }
 
+// shows clearly what the qsort call is actually doing
+// function signature taken from stdlib.h
 void SJF_AGING_ordering(struct pcb **pcbs, int count, size_t data_size, int (*comparator)(const void *, const void *)) {
     qsort(pcbs, count, data_size, comparator);
 }
 
+// returns non-empty scheduler struct with initial exec PCBs in queue
 struct scheduler *prepare_scheduler(struct pcb **pcbs, int count, char *scheduler_type, int mt_mode) {
     struct scheduler *s = init_scheduler(scheduler_type, mt_mode);
     if (s == NULL) {
@@ -94,6 +102,9 @@ struct scheduler *prepare_scheduler(struct pcb **pcbs, int count, char *schedule
     return s;
 }
 
+
+// insert old head of the ready_queue into the queue
+// based on the length_score field of the PCB
 void SJF_AGING_insert(struct scheduler *s, struct pcb *pcb) {
     struct pcb *prev = NULL;
     struct pcb *curr = s->queue->head;
@@ -105,6 +116,7 @@ void SJF_AGING_insert(struct scheduler *s, struct pcb *pcb) {
     insert_between(s->queue, pcb, prev, curr);
 }
 
+// queues PCBs in the ready_queue depending on the scheduler type
 void queue_pcbs(struct scheduler *s, struct pcb **pcbs, int count) {
     for (int i = 0; i < count; i++) {
         if (s->scheduler_type == SJF || s->scheduler_type == AGING) {
@@ -115,10 +127,13 @@ void queue_pcbs(struct scheduler *s, struct pcb **pcbs, int count) {
     }
 }
 
+// add PCB to the front of the ready queue
+// useful for batch script prioritizing for background mode
 void prioritize_pcb(struct scheduler *s, struct pcb *pcb) {
     skip_queue(s->queue, pcb);
 }
 
+// select what scheduling function to run based on scheduler_type field
 void run_scheduler(struct scheduler *s) {
     int enable_aging = NO_AGING;
     int instr_per_turn = RR_DEFAULT;
@@ -139,10 +154,12 @@ void run_scheduler(struct scheduler *s) {
             break;
     }
 
+    // reset the memory counter, all PCBs complete & won't be reused
     program_memory_counter = 0;
-    pthread_mutex_destroy(&scheduler_lock);
 }
 
+// acts like a free(pcb) call but frees all lines in the program
+// memory array in memory
 void cleanup_pcb(struct pcb *pcb) {
     cleanup_code(pcb);
     free(pcb);
@@ -151,6 +168,9 @@ void cleanup_pcb(struct pcb *pcb) {
 #define LINE_EXECUTED 0
 #define PROCESS_REMOVED 1
 
+// executes line & tells scheduling algorithm whether
+// to clean up the PCB or continue the execution according
+// to the scheduling mode
 int run_next_instruction(struct pcb *pcb, int mt_mode) {
     char *line = mem_get_program_line(pcb->pc++);
     parseInput(line);
@@ -160,18 +180,21 @@ int run_next_instruction(struct pcb *pcb, int mt_mode) {
     return LINE_EXECUTED;
 }
 
+// FCFS scheduling algorithm
+// keep running job until run_next_instruction returns PROCESS_REMOVED
+// then clean up the PCB
 void FCFS_scheduling(struct scheduler *s) {
     while (s->queue->size > 0) {
         struct pcb *pcb = dequeue_process(s->queue);
-        int status;
-        do {
-            status = run_next_instruction(pcb, MT_DISABLED);
-        } while (status != PROCESS_REMOVED);
+
+        while (run_next_instruction(pcb, MT_DISABLED) != PROCESS_REMOVED);
 
         cleanup_pcb(pcb);
     }
 }
 
+// ages all jobs in the queue and insert currently
+// executed process back into the queue
 void age_jobs(struct scheduler *s, struct pcb *pcb) {
     // already more than 1 job in queue
     // it was checked before calling the function
@@ -186,6 +209,9 @@ void age_jobs(struct scheduler *s, struct pcb *pcb) {
     SJF_AGING_insert(s, pcb);
 }
 
+// similar to FCFS in the NO_AGING branch
+// if aging is enabled then on each while loop iteration
+// all jobs must be aged and reordered
 void SJF_scheduling(struct scheduler *s, int enable_aging) {
     while (s->queue->size > 0) {
         struct pcb *pcb = dequeue_process(s->queue);
@@ -203,8 +229,9 @@ void SJF_scheduling(struct scheduler *s, int enable_aging) {
     }
 }
 
+// calls run_next_instruction to the amount of instr_per_turn
 void RR_run_instructions(struct scheduler *s, int instr_per_turn, struct pcb *pcb, int mt_mode) {
-    int status;
+    int status = LINE_EXECUTED;
     for (int i = 0; i < instr_per_turn; i++) {
         status = run_next_instruction(pcb, mt_mode);
         if (status == PROCESS_REMOVED) {
@@ -226,6 +253,8 @@ void RR_run_instructions(struct scheduler *s, int instr_per_turn, struct pcb *pc
 
 pthread_t thread1, thread2;
 
+// RR & RR30 thread function that keep on taking from the ready_queue while it is not empty
+// ready_queue size can't be 0 in both threads while there are still PCBs to execute
 void *RR_thread(void *scheduler) {
     int instr_per_turn = RR_DEFAULT;
     // no need to lock scheduler, field will not be changed
@@ -248,6 +277,8 @@ void *RR_thread(void *scheduler) {
     return NULL;
 }
 
+// RR scheduling algorithm, creates thread pool and joins threads when multithreaded is enabled
+// if MT is enabled then it skips the entire while loop and waits the join threads
 void RR_scheduling(struct scheduler *s, int instr_per_turn) {
     if (s->mt_mode == MT_ENABLED) {
         lock_scheduler();
@@ -267,6 +298,7 @@ void RR_scheduling(struct scheduler *s, int instr_per_turn) {
     }
 }
 
+// helper function to free all malloc fields of the scheduler struct
 void free_scheduler(struct scheduler *s) {
     free_queue(s->queue);
     free(s);
