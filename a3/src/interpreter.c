@@ -1,0 +1,464 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <dirent.h>
+#include <ctype.h>
+#include <unistd.h>
+#include "pcb.h"
+#include "scheduler.h"
+#include "shellmemory.h"
+#include "shell.h"
+
+#define BG_DISABLED 0
+#define BG_ENABLED 1
+
+int MAX_ARGS_SIZE = 7;
+struct scheduler *scheduler = NULL;
+
+int badcommand() {
+    printf("Unknown Command\n");
+    return 1;
+}
+
+// For source command only
+int badcommandFileDoesNotExist() {
+    printf("Bad command: File not found\n");
+    return 3;
+}
+
+
+int help();
+int quit();
+int set(char *var, char *value);
+int print(char *var);
+int source(char *script);
+int echo(char *string);
+int my_ls();
+int my_mkdir(char *dirName);
+int my_touch(char *fileName);
+int my_cd(char *dirName);
+int run(char *command_args[], int args_size);
+int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode, int mt_mode);
+int badcommandFileDoesNotExist();
+int badcommandFolderDoesNotExist();
+
+// Interpret commands and their arguments
+int interpreter(char *command_args[], int args_size) {
+    int i;
+
+    if (args_size < 1 || args_size > MAX_ARGS_SIZE) {
+        return badcommand();
+    }
+
+    for (i = 0; i < args_size; i++) {   // terminate args at newlines
+        command_args[i][strcspn(command_args[i], "\r\n")] = 0;
+    }
+
+    if (strcmp(command_args[0], "help") == 0) {
+        //help
+        if (args_size != 1)
+            return badcommand();
+        return help();
+
+    } else if (strcmp(command_args[0], "quit") == 0) {
+        //quit
+        if (args_size != 1)
+            return badcommand();
+        return quit();
+
+    } else if (strcmp(command_args[0], "set") == 0) {
+        //set
+        if (args_size != 3)
+            return badcommand();
+        return set(command_args[1], command_args[2]);
+
+    } else if (strcmp(command_args[0], "print") == 0) {
+        if (args_size != 2)
+            return badcommand();
+        return print(command_args[1]);
+
+    } else if (strcmp(command_args[0], "source") == 0) {
+        if (args_size != 2)
+            return badcommand();
+        return source(command_args[1]);
+
+    } else if (strcmp(command_args[0], "echo") == 0) {
+	    if (args_size != 2) {
+	        return badcommand();
+	    }
+	    return echo(command_args[1]);
+    } else if (strcmp(command_args[0], "my_ls") == 0) {
+    	if (args_size != 1) {
+	        return badcommand();
+	    }
+	    return my_ls();
+    } else if (strcmp(command_args[0], "my_mkdir") == 0) {
+	    if (args_size != 2) {
+	        return badcommand();
+	    }
+	    return my_mkdir(command_args[1]);
+    } else if (strcmp(command_args[0], "my_touch") == 0) {
+	    if (args_size != 2) {
+	        return badcommand();
+	    }
+	    return my_touch(command_args[1]);
+    } else if (strcmp(command_args[0], "my_cd") == 0) {
+        if (args_size != 2) {
+            return badcommand();
+        }
+        return my_cd(command_args[1]);
+    } else if (strcmp(command_args[0], "run") == 0) {
+        if (args_size <= 1) {
+            return badcommand();
+        }
+        return run(command_args + 1, args_size - 1);
+    } else if (strcmp(command_args[0], "exec") == 0) {
+        if (args_size <= 1 || args_size > 7) {
+            return badcommand();
+        }
+
+        // default values for configurable options
+        int background_mode = BG_DISABLED;
+        int multithreaded = MT_DISABLED;
+
+        // exec program handling
+        if (args_size == 2) {
+            return exec(command_args[1], NULL, NULL, "FCFS", background_mode, multithreaded);
+        }
+
+        // MT appears at the end, check if it is last argument and set options
+        if (strcmp(command_args[args_size - 1], "MT") == 0) {
+            multithreaded = MT_ENABLED;
+            args_size--;
+        }
+
+        // '#' appears before last, check if it is and set options
+        if (strcmp(command_args[args_size - 1], "#") == 0) {
+            background_mode = BG_ENABLED;
+            args_size--;
+        }
+
+        // determine if scheduling policy is valid
+        char *policy = command_args[args_size - 1];
+        if (strcmp(policy, "FCFS") != 0 &&
+            strcmp(policy, "SJF") != 0 &&
+            strcmp(policy, "RR") != 0 &&
+            strcmp(policy, "AGING") != 0 &&
+            strcmp(policy, "RR30") != 0) {
+
+            return badcommand();
+        }
+
+        // execute the remaining command arguments with the options collected
+        if (args_size == 3) {
+            return exec(command_args[1], NULL, NULL, policy, background_mode, multithreaded);
+        } else if (args_size == 4) {
+            return exec(command_args[1], command_args[2], NULL, policy, background_mode, multithreaded);
+        } else {
+            return exec(command_args[1], command_args[2], command_args[3], policy, background_mode, multithreaded);
+        }
+    } else {
+        return badcommand();
+    }
+}
+
+int help() {
+
+    // note the literal tab characters here for alignment
+    char help_string[] = "COMMAND			DESCRIPTION\n \
+help			Displays all the commands\n \
+quit			Exits / terminates the shell with “Bye!”\n \
+set VAR STRING		Assigns a value to shell memory\n \
+print VAR		Displays the STRING assigned to VAR\n \
+source SCRIPT.TXT	Executes the file SCRIPT.TXT\n ";
+    printf("%s\n", help_string);
+    return 0;
+}
+
+int quit() {
+    printf("Bye!\n");
+    // if exit is called in thread, it will kill entire process
+    // must return 0 when quit is called in MT mode
+    if (scheduler != NULL && scheduler->mt_mode == MT_ENABLED) {
+        return 0;
+    }
+    exit(0);
+}
+
+int set(char *var, char *value) {
+    // Challenge: allow setting VAR to the rest of the input line,
+    // possibly including spaces.
+
+    // Hint: Since "value" might contain multiple tokens, you'll need to loop
+    // through them, concatenate each token to the buffer, and handle spacing
+    // appropriately. Investigate how `strcat` works and how you can use it
+    // effectively here.
+
+    mem_set_value(var, value);
+    return 0;
+}
+
+
+int print(char *var) {
+    struct memory_return *result = mem_get_value(var);
+    printf("%s\n", result->res);
+    free(result->res);
+    free(result);
+    return 0;
+}
+
+
+int source(char *script) {
+    int errCode = 0;
+
+    FILE *p = fopen(script, "rt");      // the program is in a file
+
+    if (p == NULL) {
+        return badcommandFileDoesNotExist();
+    }
+
+    // create PCB from FILE
+    struct pcb *pcb = init_pcb(p);
+    fclose(p);
+
+    // simple FCFS run
+    scheduler = prepare_scheduler(&pcb, 1, "FCFS", MT_DISABLED);
+    run_scheduler(scheduler);
+
+    free_scheduler(scheduler);
+    // important for subsequent exec/source calls
+    scheduler = NULL;
+
+    return errCode;
+}
+
+int echo(char *string) {
+    int errCode = 0;
+    if (string[0] == '$' && string[1] != '\0') {
+        struct memory_return *result = mem_get_value(string + 1);
+        if (result->status == -1) {
+            printf("\n");
+        } else {
+            printf("%s\n", result->res);
+        }
+        free(result->res);
+        free(result);
+    } else {
+	    printf("%s\n", string);
+    }
+    return errCode;
+}
+
+int badcommandFolderDoesNotExist() {
+    printf("Bad command: Folder not found\n");
+    return 3;
+}
+
+int compareNames(const void *a, const void *b) {
+    const char *strA = *(const char **)a;
+    const char *strB = *(const char **)b;
+
+    return strcmp(strA, strB);
+}
+
+int my_ls() {
+    int errCode = 0;
+    DIR *dir = opendir(".");
+    if (dir == NULL) {
+        errCode = badcommandFolderDoesNotExist();
+        return errCode;
+    }
+
+    char **result = NULL;
+    struct dirent *entry;
+    int count = 0;
+
+    entry = readdir(dir);
+    while (entry != NULL) {
+        result = realloc(result, (count + 1) * sizeof(char *));
+        result[count] = strdup(entry->d_name);
+        count++;
+        entry = readdir(dir);
+    }
+
+    closedir(dir);
+
+    qsort(result, count, sizeof(char *), compareNames); 
+
+    for (int i = 0; i < count; i++) { 
+        printf("%s\n", result[i]);
+        free(result[i]);
+    }
+
+    free(result);
+
+    return errCode;
+}
+
+int alphaNumCheck(char *string) {
+    int isAlphaNum = 1;
+    for (int i = 0; i < strlen(string); i++) {
+        if (!isalnum(string[i])) {
+            isAlphaNum = 0;
+            break;
+        }
+    }
+    return isAlphaNum;
+}
+
+int badMyMkdirCommand() {
+    printf("Bad command: my_mkdir\n");
+    return 3;
+}
+
+void createDir(char *dirName) {
+    mode_t perms = 0755;
+    mkdir(dirName, perms);
+}
+
+int my_mkdir(char *dirName) {
+    int errCode = 0;
+    
+    if (dirName[0] == '$') {
+        struct memory_return *result = mem_get_value(dirName + 1);
+        if (result->status != -1 && alphaNumCheck(result->res) == 1) {
+            createDir(result->res);
+        } else {
+            errCode = badMyMkdirCommand();
+        }
+        free(result->res);
+        free(result);
+    } else {
+	    createDir(dirName);
+    }
+
+    return errCode;
+}
+
+int my_touch(char *fileName) {
+    int errCode = 0;
+    if (alphaNumCheck(fileName) == 1) {
+        FILE *f = fopen(fileName, "w");
+        fclose(f);
+        chmod(fileName, 0755);
+    }
+    return errCode;
+}
+
+int specialDirCheck(char *dirName) {
+    return strcmp(dirName, ".") == 0 || strcmp(dirName, "..") == 0;
+}
+
+int badMyCdCommand() {
+    printf("Bad command: my_cd\n");
+    return 3;
+}
+
+int my_cd(char *dirName) {
+    int errCode = 0;
+    if ((alphaNumCheck(dirName) != 1 && specialDirCheck(dirName) != 1) || chdir(dirName) != 0) {
+	    errCode = badMyCdCommand();
+    } 
+
+    return errCode;
+}
+
+int run(char *command_args[], int args_size) {
+   int errCode = 0;
+   int pid;
+
+   command_args[args_size] = (char *) NULL;
+   if ((pid = fork())) {
+       waitpid(pid, NULL, 0);
+   } else {
+       execvp(command_args[0], command_args);
+   }
+
+   return errCode;
+}
+
+// ensures all filenames are unique
+char compare_filenames(char *f1, char *f2, char *f3) {
+    // status : XXXXXABC
+    // A = 1 if f1 & f2 are the same
+    // B = 1 if f1 & f3 are the same
+    // C = 1 if f2 & f3 are the same
+    char status = 0;
+    status = f1 && f2 && strcmp(f1, f2) == 0 ? (status << 1) + 1 : status << 1;
+    status = f1 && f3 && strcmp(f1, f3) == 0 ? (status << 1) + 1 : status << 1;
+    status = f2 && f3 && strcmp(f2, f3) == 0 ? (status << 1) + 1 : status << 1;
+    return status;
+}
+
+int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode, int mt_mode) {
+    int errCode = 0;
+    char filenameStatus = compare_filenames(filename1, filename2, filename3);
+    char *files[3] = {filename1, filename2, filename3};
+    struct pcb **pcbs = (struct pcb **)malloc(3 * sizeof(struct pcb *)); // at most 3 PCBs from exec command
+    if (pcbs == NULL) {
+        printf("Something went wrong!!\n");
+        return errCode;
+    }
+
+    // normal file loading & pcb creating
+    int i = 0;
+    while (i < 3 && files[i] != NULL) { // loop is similar to the collection from the source function
+        if (i > 0 && filenameStatus != 0) {
+            if (i == 1 && (filenameStatus & 0x04) != 0) {
+                pcbs[i] = copy_pcb(pcbs[1]); // copy f1 pcb
+            } else if (i == 2) {
+                if ((filenameStatus & 0x08) != 0) {
+                    pcbs[i] = copy_pcb(pcbs[0]); // copy f1 pcb
+                } else if ((filenameStatus & 0x01) != 0) {
+                    pcbs[i] = copy_pcb(pcbs[1]); // copy f2 pcb
+                }
+            }
+            if (pcbs[i] == NULL) {
+                printf("Something went wrong!!\n");
+                return errCode;
+            }
+        } else {
+            FILE *p = fopen(files[i], "rt");
+
+            if (p == NULL) {
+                return badcommandFileDoesNotExist();
+            }
+
+            struct pcb *pcb = init_pcb(p);
+            if (pcb == NULL) {
+                printf("Something went wrong!!\n");
+                return errCode;
+            }
+            pcbs[i] = pcb;
+            fclose(p);
+        }
+        i++;
+    }
+
+    if (scheduler != NULL) {
+        // important branch for when exec is called after scheduler is already created
+        // up in call stack would be another call to exec and run_scheduler is waiting to return
+        lock_scheduler();
+        queue_pcbs(scheduler, pcbs, i);
+        unlock_scheduler();
+    } else {
+        scheduler = prepare_scheduler(pcbs, i, policy, mt_mode);
+
+        if (bg_mode == BG_ENABLED) {
+            // init_pcb takes in FILE * struct, stdin is a FILE * object
+            // stdin works on init_pcb as a FILE * would
+            struct pcb *batch_pcb = init_pcb(stdin);
+            prioritize_pcb(scheduler, batch_pcb); // add batch program to head of queue
+        }
+
+        run_scheduler(scheduler);
+
+        free_scheduler(scheduler);
+        // set to NULL for subsequent exec calls
+        scheduler = NULL;
+    }
+
+    return errCode;
+}
