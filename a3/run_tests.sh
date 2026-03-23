@@ -9,7 +9,7 @@ SHELL_NAME="mysh"
 echo "== Building shell =="
 cd "$SRC_DIR"
 make clean
-make mysh
+make mysh framesize=900 varmemsize=1000
 cd - > /dev/null   # return to root dir
 
 echo

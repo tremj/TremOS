@@ -8,13 +8,11 @@ struct memory_struct {
     char *value;
 };
 
-struct memory_struct shellmemory[MEM_SIZE];
+struct memory_struct shellmemory[VARMEMSIZE];
 
-struct program_line program_memory[MEM_SIZE];
+struct program_line frameStore[3*FRAMESIZE];
 
-struct frame_store frameStore;
-
-int program_memory_counter = 0;
+int frame_memory_counter = 0;
 
 // Helper functions
 int match(char *model, char *var) {
@@ -29,12 +27,13 @@ int match(char *model, char *var) {
 
 // Shell memory functions
 
-void mem_init(){
+void mem_init() {
     int i;
-    for (i = 0; i < MEM_SIZE; i++){		
+    int max = 3*FRAMESIZE;
+    for (i = 0; i < VARMEMSIZE; i++){
         shellmemory[i].var   = "none";
         shellmemory[i].value = "none";
-        program_memory[i].line = NULL;
+        if (i < max) frameStore[i].line = NULL;
     }
 }
 
@@ -42,7 +41,7 @@ void mem_init(){
 void mem_set_value(char *var_in, char *value_in) {
     int i;
 
-    for (i = 0; i < MEM_SIZE; i++){
+    for (i = 0; i < VARMEMSIZE; i++){
         if (strcmp(shellmemory[i].var, var_in) == 0){
             shellmemory[i].value = strdup(value_in);
             return;
@@ -50,7 +49,7 @@ void mem_set_value(char *var_in, char *value_in) {
     }
 
     //Value does not exist, need to find a free spot.
-    for (i = 0; i < MEM_SIZE; i++){
+    for (i = 0; i < VARMEMSIZE; i++){
         if (strcmp(shellmemory[i].var, "none") == 0){
             shellmemory[i].var   = strdup(var_in);
             shellmemory[i].value = strdup(value_in);
@@ -66,7 +65,7 @@ struct memory_return *mem_get_value(char *var_in) {
     int i;
     struct memory_return *result = (struct memory_return *)malloc(sizeof(struct memory_return));
 
-    for (i = 0; i < MEM_SIZE; i++){
+    for (i = 0; i < VARMEMSIZE; i++){
         if (strcmp(shellmemory[i].var, var_in) == 0){
 	    result->res = strdup(shellmemory[i].value);
 	    result->status = 0;
@@ -78,24 +77,42 @@ struct memory_return *mem_get_value(char *var_in) {
     return result;
 }
 
-void mem_set_program_line(char *line) {
-    for (int i = program_memory_counter; i < MEM_SIZE; i++) {
-        if (program_memory[i].line == NULL) {
-            program_memory[i].line = strdup(line);
-            program_memory_counter = i + 1;
-            return;
-        }
-    }
+void mem_set_program_line(int index, char *line) {
+    frameStore[index].line = strdup(line);
 }
 
 char *mem_get_program_line(int index) {
-    if (index < 0 || index >= MEM_SIZE) {
+    if (index < 0 || index >= 3*FRAMESIZE) {
         return NULL;
     }
-    return program_memory[index].line;
+    return frameStore[index].line;
 }
 
 void free_program_line(int index) {
-    free(program_memory[index].line);
-    program_memory[index].line = NULL;
+    free(frameStore[index].line);
+    frameStore[index].line = NULL;
+}
+
+int mem_set_frame(char **lines) {
+    int frameNumber = frame_memory_counter;
+//    printf("Alloc frame %d:\n", frameNumber);
+//    for (int i = 0; i < 3; i++) {
+//        printf("  [%d] = %s\n", i, lines[i]);
+//    }
+    int startIndex = frameNumber * 3;
+    for (int i = 0; i < 3 && lines[i] != NULL; i++) {
+        mem_set_program_line(startIndex + i, lines[i]);
+    }
+    frame_memory_counter++;
+    return frameNumber;
+}
+
+void mem_free_frame(int frame) {
+    int startIndex = frame * 3;
+    for (int i = 0; i < 3; i++) {
+        int index = startIndex + i;
+        if (mem_get_program_line(index) != NULL) {
+            free_program_line(index);
+        }
+    }
 }

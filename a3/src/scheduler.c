@@ -155,14 +155,7 @@ void run_scheduler(struct scheduler *s) {
     }
 
     // reset the memory counter, all PCBs complete & won't be reused
-    program_memory_counter = 0;
-}
-
-// acts like a free(pcb) call but frees all lines in the program
-// memory array in memory
-void cleanup_pcb(struct pcb *pcb) {
-    cleanup_code(pcb);
-    free(pcb);
+    frame_memory_counter = 0;
 }
 
 #define LINE_EXECUTED 0
@@ -172,9 +165,10 @@ void cleanup_pcb(struct pcb *pcb) {
 // to clean up the PCB or continue the execution according
 // to the scheduling mode
 int run_next_instruction(struct pcb *pcb, int mt_mode) {
-    char *line = mem_get_program_line(pcb->pc++);
+    char *line = fetch_next_instruction(pcb);
+//    printf("executing %s, pc: %d\n", line, pcb->pc - 1);
     parseInput(line);
-    if (pcb->start + pcb->length == pcb->pc) { // end of program
+    if (pcb->pc == pcb->length) { // end of program
         return PROCESS_REMOVED;
     }
     return LINE_EXECUTED;

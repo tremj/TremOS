@@ -6,13 +6,11 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <unistd.h>
+#include "interpreter.h"
 #include "pcb.h"
 #include "scheduler.h"
 #include "shellmemory.h"
 #include "shell.h"
-
-#define BG_DISABLED 0
-#define BG_ENABLED 1
 
 int MAX_ARGS_SIZE = 7;
 struct scheduler *scheduler = NULL;
@@ -40,7 +38,7 @@ int my_mkdir(char *dirName);
 int my_touch(char *fileName);
 int my_cd(char *dirName);
 int run(char *command_args[], int args_size);
-int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode, int mt_mode);
+int exec(char *filename1, char *filename2, char *filename3, int size, char *policy, int bg_mode, int mt_mode);
 int badcommandFileDoesNotExist();
 int badcommandFolderDoesNotExist();
 
@@ -125,7 +123,7 @@ int interpreter(char *command_args[], int args_size) {
 
         // exec program handling
         if (args_size == 2) {
-            return exec(command_args[1], NULL, NULL, "FCFS", background_mode, multithreaded);
+            return exec(command_args[1], NULL, NULL, 1, "FCFS", background_mode, multithreaded);
         }
 
         // MT appears at the end, check if it is last argument and set options
@@ -153,11 +151,11 @@ int interpreter(char *command_args[], int args_size) {
 
         // execute the remaining command arguments with the options collected
         if (args_size == 3) {
-            return exec(command_args[1], NULL, NULL, policy, background_mode, multithreaded);
+            return exec(command_args[1], NULL, NULL, 1, policy, background_mode, multithreaded);
         } else if (args_size == 4) {
-            return exec(command_args[1], command_args[2], NULL, policy, background_mode, multithreaded);
+            return exec(command_args[1], command_args[2], NULL, 2, policy, background_mode, multithreaded);
         } else {
-            return exec(command_args[1], command_args[2], command_args[3], policy, background_mode, multithreaded);
+            return exec(command_args[1], command_args[2], command_args[3], 3, policy, background_mode, multithreaded);
         }
     } else {
         return badcommand();
@@ -195,7 +193,6 @@ int set(char *var, char *value) {
     // through them, concatenate each token to the buffer, and handle spacing
     // appropriately. Investigate how `strcat` works and how you can use it
     // effectively here.
-
     mem_set_value(var, value);
     return 0;
 }
@@ -220,8 +217,16 @@ int source(char *script) {
     }
 
     // create PCB from FILE
-    struct pcb *pcb = init_pcb(p);
+    struct pcb *pcb = init_pcb(p, BG_DISABLED);
     fclose(p);
+
+    int sourceCmd = SOURCE_CMD_FLAG;
+    struct pcb *pcbs[3] = {pcb, NULL, NULL};
+    char *files[3] = {script, NULL, NULL};
+    int status = load_code(pcbs, files, 0, 1, sourceCmd);
+    if (status == -1) {
+        badcommandFileDoesNotExist();
+    }
 
     // simple FCFS run
     scheduler = prepare_scheduler(&pcb, 1, "FCFS", MT_DISABLED);
@@ -392,17 +397,13 @@ char compare_filenames(char *f1, char *f2, char *f3) {
     return status;
 }
 
-int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg_mode, int mt_mode) {
+int exec(char *filename1, char *filename2, char *filename3, int size, char *policy, int bg_mode, int mt_mode) {
     int errCode = 0;
     char filenameStatus = compare_filenames(filename1, filename2, filename3);
     char *files[3] = {filename1, filename2, filename3};
-    struct pcb **pcbs = (struct pcb **)malloc(3 * sizeof(struct pcb *)); // at most 3 PCBs from exec command
-    if (pcbs == NULL) {
-        printf("Something went wrong!!\n");
-        return errCode;
-    }
+    struct pcb *pcbs[3];
 
-    // normal file loading & pcb creating
+    // pcb creating, no code loading
     int i = 0;
     while (i < 3 && files[i] != NULL) { // loop is similar to the collection from the source function
         if (i > 0 && filenameStatus != 0) {
@@ -426,7 +427,7 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg
                 return badcommandFileDoesNotExist();
             }
 
-            struct pcb *pcb = init_pcb(p);
+            struct pcb *pcb = init_pcb(p, BG_DISABLED);
             if (pcb == NULL) {
                 printf("Something went wrong!!\n");
                 return errCode;
@@ -435,6 +436,11 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg
             fclose(p);
         }
         i++;
+    }
+
+    int status = load_code(pcbs, files, filenameStatus, size, -1);
+    if (status == -1) {
+        badcommandFileDoesNotExist();
     }
 
     if (scheduler != NULL) {
@@ -449,7 +455,7 @@ int exec(char *filename1, char *filename2, char *filename3, char *policy, int bg
         if (bg_mode == BG_ENABLED) {
             // init_pcb takes in FILE * struct, stdin is a FILE * object
             // stdin works on init_pcb as a FILE * would
-            struct pcb *batch_pcb = init_pcb(stdin);
+            struct pcb *batch_pcb = init_pcb(stdin, BG_ENABLED);
             prioritize_pcb(scheduler, batch_pcb); // add batch program to head of queue
         }
 

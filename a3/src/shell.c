@@ -1,7 +1,6 @@
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> 
+#include <string.h>
 #include <unistd.h>
 #include "interpreter.h"
 #include "scheduler.h"
@@ -9,13 +8,21 @@
 #include "shellmemory.h"
 #include "queue.h"
 
+#ifndef FRAMESIZE
+#error "FRAMESIZE is not defined"
+#endif
+
+#ifndef VARMEMSIZE
+#error "VARMEMSIZE is not defined"
+#endif
+
 int parseInput(char ui[]);
 
 // Start of everything
 int main(int argc, char *argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
     init_scheduler_lock();
-    printf("Shell version 1.5 created Dec 2025\n");
+    printf("Frame Store Size = %d; Variable Store Size = %d\n", FRAMESIZE, VARMEMSIZE);
 
     init_queue();
 
@@ -72,17 +79,17 @@ int parseInput(char inp[]) {
         words[w] = strdup(tmp);
         w++;
         if (inp[ix] == '\0') break;
-	if (inp[ix] == ';') {
-	    errorCode = interpreter(words, w);
-	    while (w > 0) free(words[--w]);
-	}
+        if (inp[ix] == ';') {
+            errorCode = interpreter(words, w);
+            while (w > 0) free(words[--w]);
+        }
         ix++; 
-	while (wordEnding(inp[ix]) && inp[ix] != '\0') ix++;
+	    while (wordEnding(inp[ix]) && inp[ix] != '\0') ix++;
     }
     
     if (w > 0) { 
-	errorCode = interpreter(words, w); 
-	while (w > 0) free(words[--w]);
+	    errorCode = interpreter(words, w);
+	    while (w > 0) free(words[--w]);
     }
     return errorCode;
 }
