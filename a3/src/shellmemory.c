@@ -1,6 +1,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "lru.h"
+#include "pagetable.h"
+#include "pcb.h"
 #include "shellmemory.h"
 
 struct memory_struct {
@@ -10,7 +13,9 @@ struct memory_struct {
 
 struct memory_struct shellmemory[VARMEMSIZE];
 
-struct program_line frameStore[3*FRAMESIZE];
+struct frame frameStore[FRAMESIZE / 3];
+
+struct lru *lru;
 
 int frame_memory_counter = 0;
 
@@ -28,13 +33,18 @@ int match(char *model, char *var) {
 // Shell memory functions
 
 void mem_init() {
-    int i;
-    int max = 3*FRAMESIZE;
-    for (i = 0; i < VARMEMSIZE; i++){
+    for (int i = 0; i < VARMEMSIZE; i++) {
         shellmemory[i].var   = "none";
         shellmemory[i].value = "none";
-        if (i < max) frameStore[i].line = NULL;
     }
+    for (int i = 0; i < FRAMESIZE / 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            frameStore[i].lines[j] = NULL;
+        }
+        frameStore[i].pcb = NULL;
+        frameStore[i].index = i;
+    }
+    lru = init_lru();
 }
 
 // Set key value pair
@@ -77,42 +87,112 @@ struct memory_return *mem_get_value(char *var_in) {
     return result;
 }
 
-void mem_set_program_line(int index, char *line) {
-    frameStore[index].line = strdup(line);
+void mem_set_program_line(int frame, int offset, char *line) {
+    frameStore[frame].lines[offset] = strdup(line);
 }
 
-char *mem_get_program_line(int index) {
-    if (index < 0 || index >= 3*FRAMESIZE) {
+char *mem_get_program_line(struct pcb *pcb, int frame, int offset) {
+    if (frame < 0 || frame >= FRAMESIZE / 3 || offset < 0 || offset >= 3) {
         return NULL;
     }
-    return frameStore[index].line;
+    struct frame *frameRef = &frameStore[frame];
+    // pcb does not own this frame anymore
+    if (frameRef->pcb != pcb) {
+        pcb->page_fault = PAGE_FAULT;
+        return NULL;
+    }
+    // enqueue frame into LRU when
+    // it has no "neighbours" and it is not the only element in the LRU
+    // the prev or next field wouldn't be NULL if the frame wasn't the only element
+    // ----
+    // in any other case, the frame has already been added to the LRU and
+    // must be prioritized to the front to avoid being evicted
+    if (frameRef->prev == NULL && frameRef->next == NULL && lru->head != frameRef) {
+        enqueue_frame(lru, frameRef);
+    } else {
+        prioritize_frame(lru, frameRef);
+    }
+    return frameStore[frame].lines[offset];
 }
 
-void free_program_line(int index) {
-    free(frameStore[index].line);
-    frameStore[index].line = NULL;
+void free_program_line(int frame, int offset) {
+    free(frameStore[frame].lines[offset]);
+    frameStore[frame].lines[offset] = NULL;
 }
 
-int mem_set_frame(char **lines) {
+int mem_set_frame(struct pcb *pcb, char **lines) {
     int frameNumber = frame_memory_counter;
 //    printf("Alloc frame %d:\n", frameNumber);
 //    for (int i = 0; i < 3; i++) {
 //        printf("  [%d] = %s\n", i, lines[i]);
 //    }
-    int startIndex = frameNumber * 3;
+    frameStore[frameNumber].pcb = pcb;
     for (int i = 0; i < 3 && lines[i] != NULL; i++) {
-        mem_set_program_line(startIndex + i, lines[i]);
+        mem_set_program_line(frameNumber, i, lines[i]);
     }
     frame_memory_counter++;
     return frameNumber;
 }
 
-void mem_free_frame(int frame) {
-    int startIndex = frame * 3;
+void mem_update_frame(int frame, char **lines) {
     for (int i = 0; i < 3; i++) {
-        int index = startIndex + i;
-        if (mem_get_program_line(index) != NULL) {
-            free_program_line(index);
+        if (frameStore[frame].lines[i] == NULL) {
+            free_program_line(frame, i);
+        }
+        if (lines[i] != NULL) {
+            mem_set_program_line(frame, i, lines[i]);
         }
     }
+}
+
+// handles the page fault
+void handle_page_fault(struct pcb *pcb) {
+    printf("Page fault!");
+    int pageTableIndex = pcb->pc / 3;
+    int frameIndex = -1;
+    // are all frames allocated?
+    // if yes, we need to evict a frame from the LRU
+    if (frame_memory_counter >= (FRAMESIZE / 3)) {
+        struct frame *frame = evict_frame(lru);
+        printf(" Victim page contents:\n\n");
+        for (int i = 0; i < 3; i++) {
+            printf("%s\n", frame->lines[i]);
+        }
+        printf("\nEnd of victim page contents.\n");
+        // frame is now invalid in the old PCB
+        // frame is now owned by new PCB
+        frame->pcb = pcb;
+        frameIndex = frame->index;
+        pcb->page_table->table[pageTableIndex] = frameIndex;
+    } else {
+        printf("\n");
+    }
+
+    FILE *p = fopen(pcb->filename, "rt");
+    long offset = pcb->page_table->page_offset[pageTableIndex];
+    // use the page offset to get next page lines
+    fseek(p, offset, SEEK_SET);
+    char *lines[3] = {NULL, NULL, NULL};
+    size_t line_buf = 0;
+    for (int i = 0; i < 3; i++) {
+        char *line = NULL;
+        ssize_t line_len = getline(&line, &line_buf, p);
+        if (line_len == -1) {
+            break;
+        }
+        if (line_len > 0 && line[line_len - 1] == '\n') {
+            line[line_len - 1] = '\0';
+        }
+        lines[i] = strdup(line);
+        free(line);
+    }
+    // set an empty frame or update an evicted frame?
+    if (frameIndex == -1) {
+        int frame = mem_set_frame(pcb, lines);
+        pcb->page_table->table[pageTableIndex] = frame;
+    } else {
+        mem_update_frame(frameIndex, lines);
+    }
+    // remove the page fault "flag" to continue execution
+    pcb->page_fault = NO_PAGE_FAULT;
 }

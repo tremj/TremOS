@@ -217,7 +217,7 @@ int source(char *script) {
     }
 
     // create PCB from FILE
-    struct pcb *pcb = init_pcb(p, BG_DISABLED);
+    struct pcb *pcb = init_pcb(p, script);
     fclose(p);
 
     int sourceCmd = SOURCE_CMD_FLAG;
@@ -427,7 +427,7 @@ int exec(char *filename1, char *filename2, char *filename3, int size, char *poli
                 return badcommandFileDoesNotExist();
             }
 
-            struct pcb *pcb = init_pcb(p, BG_DISABLED);
+            struct pcb *pcb = init_pcb(p, files[i]);
             if (pcb == NULL) {
                 printf("Something went wrong!!\n");
                 return errCode;
@@ -455,7 +455,7 @@ int exec(char *filename1, char *filename2, char *filename3, int size, char *poli
         if (bg_mode == BG_ENABLED) {
             // init_pcb takes in FILE * struct, stdin is a FILE * object
             // stdin works on init_pcb as a FILE * would
-            struct pcb *batch_pcb = init_pcb(stdin, BG_ENABLED);
+            struct pcb *batch_pcb = init_pcb(stdin, "bg_script");
             prioritize_pcb(scheduler, batch_pcb); // add batch program to head of queue
         }
 

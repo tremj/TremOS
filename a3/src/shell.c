@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include "interpreter.h"
 #include "scheduler.h"
@@ -8,19 +9,13 @@
 #include "shellmemory.h"
 #include "queue.h"
 
-#ifndef FRAMESIZE
-#error "FRAMESIZE is not defined"
-#endif
-
-#ifndef VARMEMSIZE
-#error "VARMEMSIZE is not defined"
-#endif
 
 int parseInput(char ui[]);
 
 // Start of everything
 int main(int argc, char *argv[]) {
     setvbuf(stdout, NULL, _IONBF, 0);
+    srand(time(NULL));
     init_scheduler_lock();
     printf("Frame Store Size = %d; Variable Store Size = %d\n", FRAMESIZE, VARMEMSIZE);
 

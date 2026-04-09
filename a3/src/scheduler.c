@@ -160,13 +160,17 @@ void run_scheduler(struct scheduler *s) {
 
 #define LINE_EXECUTED 0
 #define PROCESS_REMOVED 1
+#define NO_OP 2
 
 // executes line & tells scheduling algorithm whether
 // to clean up the PCB or continue the execution according
 // to the scheduling mode
 int run_next_instruction(struct pcb *pcb, int mt_mode) {
     char *line = fetch_next_instruction(pcb);
-//    printf("executing %s, pc: %d\n", line, pcb->pc - 1);
+    if (pcb->page_fault == PAGE_FAULT) {
+        handle_page_fault(pcb);
+        return NO_OP; // figure out what to return
+    }
     parseInput(line);
     if (pcb->pc == pcb->length) { // end of program
         return PROCESS_REMOVED;
@@ -231,13 +235,15 @@ void RR_run_instructions(struct scheduler *s, int instr_per_turn, struct pcb *pc
         if (status == PROCESS_REMOVED) {
             cleanup_pcb(pcb);
             break;
+        } else if (status == NO_OP) {
+            break;
         }
     }
 
     if (mt_mode == MT_ENABLED) {
         lock_scheduler();
     }
-    if (status == LINE_EXECUTED) {
+    if (status == LINE_EXECUTED || status == NO_OP) {
         enqueue_process(s->queue, pcb);
     }
     if (mt_mode == MT_ENABLED) {

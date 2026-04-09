@@ -5,30 +5,38 @@
 #include "pagetable.h"
 #include "pcb.h"
 #include "shellmemory.h"
+#include "scheduler.h"
 
 
 int next_pid = 1;
 
 // function reads a FILE * struct line by line and adds each line to the
 // shell memory program line array
-struct pcb *init_pcb(FILE *p, int bg_mode) {
+struct pcb *init_pcb(FILE *p, char *filename) {
     struct pcb *pcb = (struct pcb *) malloc(sizeof(struct pcb));
     if (pcb == NULL) {
         return NULL;
     }
+    pcb->filename = strdup(filename);
     pcb->pc = 0;
     pcb->length = 0;
     pcb->next = NULL;
     pcb->page_table = (struct page_table *) malloc(sizeof(struct page_table));
-    int pt_malloc_size = 2;
-    if (bg_mode == BG_ENABLED) {
-        pcb->page_table->table = (int *) malloc(pt_malloc_size * sizeof(int));
-        pcb->page_table->size = 0;
-    }
-    pcb->page_table->references = 1;
-    size_t line_buf = 0; // will get resized by getline call
+    int page_count = 0;
+    int page_bit_offset_capacity = 4;
+    // keeping track of page offsets will make getting a new page easy with the fseek() function call
+    pcb->page_table->page_offset = (long *) malloc(page_bit_offset_capacity * sizeof(long));
 
+    size_t line_buf = 0; // will get resized by getline call
     while (1) {
+        if (page_count == page_bit_offset_capacity) {
+            page_bit_offset_capacity *= 2;
+            pcb->page_table->page_offset = (long *) realloc(pcb->page_table->page_offset, page_bit_offset_capacity * sizeof(long));
+        }
+
+        long page_start = ftell(p);
+        pcb->page_table->page_offset[page_count++] = page_start;
+
         char *lines[3] = {NULL, NULL, NULL};
         for (int i = 0; i < 3; i++) {
             char *line = NULL;
@@ -45,21 +53,8 @@ struct pcb *init_pcb(FILE *p, int bg_mode) {
         }
 
         if (lines[0] == NULL) { // no lines added
+            page_count--;
             break;
-        }
-
-        if (bg_mode == BG_ENABLED) {
-            int frame = mem_set_frame(lines);
-            pcb->page_table->table[pcb->page_table->size++] = frame;
-            if (pcb->page_table->size == pt_malloc_size) {
-                pt_malloc_size *= 2;
-                void *tmp = (int *) realloc(pcb->page_table->table, pt_malloc_size * sizeof(int));
-                if (tmp == NULL) {
-                    return NULL;
-                } else {
-                    pcb->page_table->table = tmp;
-                }
-            }
         }
 
         // semi-full frame, file is done
@@ -68,20 +63,14 @@ struct pcb *init_pcb(FILE *p, int bg_mode) {
         }
     }
 
+    // create pcb fields based on information collected in the while loop
     pcb->pid = next_pid++;
     pcb->length_score = pcb->length;
-    int total_frames = (pcb->length + 3 - 1) / 3; // ceiling of length / 3
-    if (bg_mode == BG_ENABLED) {
-        void *tmp = (int *) realloc(pcb->page_table->table, pcb->page_table->size * sizeof(int));
-        if (tmp == NULL) {
-            return NULL;
-        } else {
-            pcb->page_table->table = tmp;
-        }
-    } else {
-        pcb->page_table->table = (int *) malloc(sizeof(int) * total_frames);
+    pcb->page_table->table = (int *) malloc(sizeof(int) * page_count);
+    for (int i = 0; i < page_count; i++) {
+        pcb->page_table->table[i] = -1;
     }
-    pcb->page_table->size = total_frames;
+    pcb->page_table->size = page_count;
     return pcb;
 }
 
@@ -124,11 +113,12 @@ int load_code(struct pcb **pcbs, char *files[], char fileStatus, int size, int s
     }
 
     // start loading code
-    int total = i;
     i = 0;
     int page_table_index[3] = {0, 0, 0};
-    int done = 0;
-    while (done != total) {
+    // each iteration gets a page
+    // iterations can skip files
+    // total 6 iterations --> 2 pages / program even if skipped
+    for (int j = 0; j < 6; j++) {
         int program = order[i];
         if (program == -1) {
             i = (i + 1) % 3;
@@ -141,7 +131,6 @@ int load_code(struct pcb **pcbs, char *files[], char fileStatus, int size, int s
             char *line = NULL;
             ssize_t line_len = getline(&line, &line_buf, f_objs[program]);
             if (line_len == -1) {
-                done++;
                 order[i] = -1;
                 break;
             }
@@ -157,7 +146,7 @@ int load_code(struct pcb **pcbs, char *files[], char fileStatus, int size, int s
             continue;
         }
 
-        int frame = mem_set_frame(lines);
+        int frame = mem_set_frame(pcbs[program], lines);
         pcbs[program]->page_table->table[page_table_index[program]] = frame;
         page_table_index[program]++;
         i = (i + 1) % 3;
@@ -172,29 +161,28 @@ int load_code(struct pcb **pcbs, char *files[], char fileStatus, int size, int s
     return 0;
 }
 
+
 char *fetch_next_instruction(struct pcb *pcb) {
     int frame = pcb->page_table->table[pcb->pc / 3];
-    int offset = pcb->pc % 3;
-    pcb->pc++;
-    return mem_get_program_line(frame*3 + offset);
-}
-
-// cleaning up PCB code lines stored in program line memory
-void cleanup_code(struct pcb *pcb) {
-    for (int i = 0; i < pcb->page_table->size; i++) {
-        mem_free_frame(pcb->page_table->table[i]);
+    if (frame == -1) {
+        pcb->page_fault = PAGE_FAULT;
+        return NULL;
     }
+    int offset = pcb->pc % 3;
+    char *line = mem_get_program_line(pcb, frame, offset);
+    if (pcb->page_table == PAGE_FAULT) {
+        return NULL;
+    }
+    pcb->page_fault = NO_PAGE_FAULT;
+    pcb->pc++;
+    return line;
 }
 
 // acts like a free(pcb) call but frees all lines in the program
 // memory array in memory
 void cleanup_pcb(struct pcb *pcb) {
-    if (pcb->page_table->references == 1) {
-        cleanup_code(pcb);
-        free_page_table(pcb->page_table);
-    } else {
-        pcb->page_table->references--;
-    }
+    free_page_table(pcb->page_table);
+    free(pcb->filename);
     free(pcb);
 }
 
@@ -225,7 +213,6 @@ struct pcb *copy_pcb(struct pcb *pcb) {
     new_pcb->pid = next_pid++;
     new_pcb->pc = pcb->pc;
     new_pcb->page_table = pcb->page_table;
-    new_pcb->page_table->references++;
 
     return new_pcb;
 }

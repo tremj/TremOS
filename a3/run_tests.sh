@@ -1,111 +1,104 @@
 #!/bin/bash
 
 # -------- CONFIG --------
-SRC_DIR="./src"              # path to mysh source
-TEST_DIR="./test-cases"      # path to test cases
+SRC_DIR="./src"
+TEST_DIR="./a3-test-cases"
 SHELL_NAME="mysh"
 # ------------------------
 
-echo "== Building shell =="
-cd "$SRC_DIR"
-make clean
-make mysh framesize=900 varmemsize=1000
-cd - > /dev/null   # return to root dir
-
-echo
 echo "== Running tests =="
 echo
 
 FAILURES=0
 FAILED_TESTS=()
 
-cd "$TEST_DIR"
+for i in {1..5}; do
+    testfile="tc${i}.txt"
+    expected="tc${i}_result.txt"
 
-for testfile in T_*.txt; do
-    # Skip *_result.txt files
-    [[ "$testfile" == *_result.txt ]] && continue
-    [[ "$testfile" == *_result2.txt ]] && continue
-
-    base=$(basename "$testfile" .txt)
-    expected1="${base}_result.txt"
-    expected2="${base}_result2.txt"
-    output="$(mktemp)"
-
-    if [[ ! -f "$expected1" && ! -f "$expected2" ]]; then
-        echo "[SKIP] $base (missing result file)"
+    if [[ ! -f "$TEST_DIR/$testfile" || ! -f "$TEST_DIR/$expected" ]]; then
+        echo "[SKIP] tc${i} (missing files)"
+        FAILURES=$((FAILURES + 1))
+        FAILED_TESTS+=("tc${i}")
         continue
     fi
 
-    # Run the shell from src while inside test-cases
-    "../src/$SHELL_NAME" < "$testfile" > "$output"
+    # ---------------------------------------
+    # Extract frame/variable store sizes
+    # ---------------------------------------
+    first_line=$(head -n 1 "$TEST_DIR/$expected")
 
-    PASS=false
+    # Extract numbers using regex
+    framesize=$(echo "$first_line" | sed -n 's/.*Frame Store Size = \([0-9]*\).*/\1/p')
+    varmemsize=$(echo "$first_line" | sed -n 's/.*Variable Store Size = \([0-9]*\).*/\1/p')
 
-    # -----------------------------
-    # Special handling for MT tests
-    # -----------------------------
-    if [[ "$base" == T_MT* ]]; then
-        if [[ -f "$expected1" ]]; then
-            PASS=true
-
-            # For each unique line in expected result
-            while IFS= read -r line; do
-                expected_count=$(grep -Fx "$line" "$expected1" | wc -l)
-                actual_count=$(grep -Fx "$line" "$output" | wc -l)
-
-                if [[ "$expected_count" -ne "$actual_count" ]]; then
-                    PASS=false
-                    break
-                fi
-            done < <(sort -u "$expected1")
-
-            # Also ensure output doesn't contain extra unexpected lines
-            if [[ "$PASS" = true ]]; then
-                while IFS= read -r line; do
-                    expected_count=$(grep -Fx "$line" "$expected1" | wc -l)
-                    actual_count=$(grep -Fx "$line" "$output" | wc -l)
-
-                    if [[ "$expected_count" -ne "$actual_count" ]]; then
-                        PASS=false
-                        break
-                    fi
-                done < <(sort -u "$output")
-            fi
-        fi
-
-    else
-        # -----------------------------
-        # Normal ordered tests
-        # -----------------------------
-        if [[ -f "$expected1" ]] && diff -q "$expected1" "$output" > /dev/null; then
-            PASS=true
-        fi
-
-        if [[ "$PASS" = false && -f "$expected2" ]] && diff -q "$expected2" "$output" > /dev/null; then
-            PASS=true
-        fi
+    if [[ -z "$framesize" || -z "$varmemsize" ]]; then
+        echo "[FAIL] tc${i} (could not parse sizes)"
+        FAILURES=$((FAILURES + 1))
+        FAILED_TESTS+=("tc${i}")
+        continue
     fi
 
-    if [[ "$PASS" = true ]]; then
-        echo "[PASS] $base"
-    else
-        echo "[FAIL] $base"
+    # ---------------------------------------
+    # Build with extracted parameters
+    # ---------------------------------------
+    echo "== Building for tc${i} (F=$framesize, V=$varmemsize) =="
+
+    cd "$SRC_DIR"
+    make clean > /dev/null
+    make mysh framesize="$framesize" varmemsize="$varmemsize" > /dev/null
+
+    if [[ $? -ne 0 ]]; then
+        echo "[FAIL] tc${i} (build failed)"
+        cd - > /dev/null
         FAILURES=$((FAILURES + 1))
-        FAILED_TESTS+=("$base")
+        FAILED_TESTS+=("tc${i}")
+        continue
+    fi
+
+    cd - > /dev/null
+
+    # ---------------------------------------
+    # Run test
+    # ---------------------------------------
+    output="$(mktemp)"
+
+    cd $TEST_DIR
+
+    "./../src/$SHELL_NAME" < "$testfile" > "$output"
+
+#    if diff -q "$expected" "$output" > /dev/null; then
+    if diff -u "$expected" "$output"; then
+        echo "[PASS] tc${i}"
+    else
+        echo "[FAIL] tc${i}"
+        FAILURES=$((FAILURES + 1))
+        FAILED_TESTS+=("tc${i}")
     fi
 
     rm "$output"
+    cd ..
 done
 
+# ---------------------------------------
+# Cleanup
+# ---------------------------------------
+echo
 echo "== Cleaning up Shell =="
-cd "../$SRC_DIR"
-make clean
-echo "Done cleanup!"
+cd "$SRC_DIR"
+make clean > /dev/null
+cd - > /dev/null
 
+# ---------------------------------------
+# Summary
+# ---------------------------------------
 echo
 echo "== Test Summary =="
-cd "../$TEST_DIR"
-echo "Passed: $(( $(ls T_*.txt 2>/dev/null | grep -v '_result' | wc -l) - FAILURES ))"
+
+TOTAL=5
+PASSED=$((TOTAL - FAILURES))
+
+echo "Passed: $PASSED"
 echo "Failed: $FAILURES"
 
 if [[ $FAILURES -ne 0 ]]; then

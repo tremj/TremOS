@@ -67,8 +67,5 @@ void insert_between(struct ready_queue *queue, struct pcb *pcb_insert, struct pc
 
 // helper function to free any allocated memory in queue
 void free_queue(struct ready_queue *queue) {
-    while (queue->size > 0) {
-        cleanup_code(dequeue_process(queue));
-    }
     free(queue);
 }
