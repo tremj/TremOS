@@ -41,7 +41,6 @@ void mem_init() {
         for (int j = 0; j < 3; j++) {
             frameStore[i].lines[j] = NULL;
         }
-        frameStore[i].pcb = NULL;
         frameStore[i].index = i;
     }
     lru = init_lru();
@@ -91,14 +90,8 @@ void mem_set_program_line(int frame, int offset, char *line) {
     frameStore[frame].lines[offset] = strdup(line);
 }
 
-char *mem_get_program_line(struct pcb *pcb, int frame, int offset) {
+char *mem_get_program_line(int frame, int offset) {
     if (frame < 0 || frame >= FRAMESIZE / 3 || offset < 0 || offset >= 3) {
-        return NULL;
-    }
-    struct frame *frameRef = &frameStore[frame];
-    // pcb does not own this frame anymore
-    if (frameRef->pcb != pcb) {
-        pcb->page_fault = PAGE_FAULT;
         return NULL;
     }
     // enqueue frame into LRU when
@@ -107,6 +100,7 @@ char *mem_get_program_line(struct pcb *pcb, int frame, int offset) {
     // ----
     // in any other case, the frame has already been added to the LRU and
     // must be prioritized to the front to avoid being evicted
+    struct frame *frameRef = &frameStore[frame];
     if (frameRef->prev == NULL && frameRef->next == NULL && lru->head != frameRef) {
         enqueue_frame(lru, frameRef);
     } else {
@@ -123,7 +117,6 @@ void free_program_line(int frame, int offset) {
 int mem_set_frame(struct pcb *pcb, char **lines) {
     // incrementally allocate frames
     int frameNumber = frame_memory_counter;
-    frameStore[frameNumber].pcb = pcb;
     // insert non NULL lines into frame
     for (int i = 0; i < 3 && lines[i] != NULL; i++) {
         mem_set_program_line(frameNumber, i, lines[i]);
@@ -158,9 +151,6 @@ void handle_page_fault(struct pcb *pcb) {
             printf("%s\n", frame->lines[i]);
         }
         printf("\nEnd of victim page contents.\n");
-        // frame is now invalid in the old PCB
-        // frame is now owned by new PCB
-        frame->pcb = pcb;
         frameIndex = frame->index;
         pcb->page_table->table[pageTableIndex] = frameIndex;
     } else {

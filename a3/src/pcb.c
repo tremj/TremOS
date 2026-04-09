@@ -5,7 +5,6 @@
 #include "pagetable.h"
 #include "pcb.h"
 #include "shellmemory.h"
-#include "scheduler.h"
 
 
 int next_pid = 1;
@@ -170,10 +169,7 @@ char *fetch_next_instruction(struct pcb *pcb) {
         return NULL;
     }
     int offset = pcb->pc % 3;
-    char *line = mem_get_program_line(pcb, frame, offset);
-    if (pcb->page_fault == PAGE_FAULT) { // inside func call a page fault can occur
-        return NULL;
-    }
+    char *line = mem_get_program_line(frame, offset);
     pcb->page_fault = NO_PAGE_FAULT;
     pcb->pc++; // only increment pc after successful retrieval
     return line;

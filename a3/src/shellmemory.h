@@ -10,7 +10,6 @@ extern int frame_memory_counter;
 
 struct frame {
     char *lines[3];
-    struct pcb *pcb;
     struct frame *prev;
     struct frame *next;
     int index;
@@ -28,7 +27,7 @@ void mem_init();
 struct memory_return *mem_get_value(char *var);
 void mem_set_value(char *var, char *value);
 void mem_set_program_line(int frame, int index, char *line);
-char *mem_get_program_line(struct pcb *pcb, int frame, int offset);
+char *mem_get_program_line(int frame, int offset);
 void free_program_line(int frame, int offset);
 int mem_set_frame(struct pcb *pcb, char **lines);
 void handle_page_fault(struct pcb *pcb);
