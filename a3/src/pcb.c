@@ -117,7 +117,7 @@ int load_code(struct pcb **pcbs, char *files[], char fileStatus, int size, int s
     int page_table_index[3] = {0, 0, 0};
     // each iteration gets a page
     // iterations can skip files
-    // total 6 iterations --> 2 pages / program even if skipped
+    // total 6 iterations --> load first 2 pages of program even if skipped
     for (int j = 0; j < 6; j++) {
         int program = order[i];
         if (program == -1) {
@@ -127,7 +127,7 @@ int load_code(struct pcb **pcbs, char *files[], char fileStatus, int size, int s
 
         char *lines[3] = {NULL, NULL, NULL};
         size_t line_buf = 0;
-        for (int j = 0; j < 3; j++) {
+        for (int k = 0; k < 3; k++) {
             char *line = NULL;
             ssize_t line_len = getline(&line, &line_buf, f_objs[program]);
             if (line_len == -1) {
@@ -137,7 +137,7 @@ int load_code(struct pcb **pcbs, char *files[], char fileStatus, int size, int s
             if (line_len > 0 && line[line_len - 1] == '\n') {
                 line[line_len - 1] = '\0';
             }
-            lines[j] = strdup(line);
+            lines[k] = strdup(line);
             free(line);
         }
 
@@ -146,6 +146,7 @@ int load_code(struct pcb **pcbs, char *files[], char fileStatus, int size, int s
             continue;
         }
 
+        // set frame in memory and add the frame index to the program's page table
         int frame = mem_set_frame(pcbs[program], lines);
         pcbs[program]->page_table->table[page_table_index[program]] = frame;
         page_table_index[program]++;
@@ -170,11 +171,11 @@ char *fetch_next_instruction(struct pcb *pcb) {
     }
     int offset = pcb->pc % 3;
     char *line = mem_get_program_line(pcb, frame, offset);
-    if (pcb->page_table == PAGE_FAULT) {
+    if (pcb->page_fault == PAGE_FAULT) { // inside func call a page fault can occur
         return NULL;
     }
     pcb->page_fault = NO_PAGE_FAULT;
-    pcb->pc++;
+    pcb->pc++; // only increment pc after successful retrieval
     return line;
 }
 

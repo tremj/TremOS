@@ -5,6 +5,7 @@
 
 
 // simple implementation of a doubly linked list specifically for a frame struct
+// function bodies modified from implementations in queue.c
 
 // create an empty queue
 struct lru *init_lru() {

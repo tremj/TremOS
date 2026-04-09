@@ -121,12 +121,10 @@ void free_program_line(int frame, int offset) {
 }
 
 int mem_set_frame(struct pcb *pcb, char **lines) {
+    // incrementally allocate frames
     int frameNumber = frame_memory_counter;
-//    printf("Alloc frame %d:\n", frameNumber);
-//    for (int i = 0; i < 3; i++) {
-//        printf("  [%d] = %s\n", i, lines[i]);
-//    }
     frameStore[frameNumber].pcb = pcb;
+    // insert non NULL lines into frame
     for (int i = 0; i < 3 && lines[i] != NULL; i++) {
         mem_set_program_line(frameNumber, i, lines[i]);
     }
@@ -135,9 +133,10 @@ int mem_set_frame(struct pcb *pcb, char **lines) {
 }
 
 void mem_update_frame(int frame, char **lines) {
+    // free all lines in frame and replace them
     for (int i = 0; i < 3; i++) {
         if (frameStore[frame].lines[i] == NULL) {
-            free_program_line(frame, i);
+            free_program_line(frame, i); // sets line to NULL after
         }
         if (lines[i] != NULL) {
             mem_set_program_line(frame, i, lines[i]);
