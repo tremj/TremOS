@@ -143,7 +143,7 @@ void handle_page_fault(struct pcb *pcb) {
     int pageTableIndex = pcb->pc / 3;
     int frameIndex = -1;
     // are all frames allocated?
-    // if yes, we need to evict a frame from the LRU
+    // if yes, we need to evict a frame using the LRU
     if (frame_memory_counter >= (FRAMESIZE / 3)) {
         struct frame *frame = evict_frame(lru);
         printf(" Victim page contents:\n\n");
